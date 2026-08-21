@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config
+from . import audit_log, config
 from .engine import mask_text
 from .file_processing import (
     mask_csv_file,
@@ -85,6 +85,7 @@ def mask_text_endpoint(request: MaskTextRequest):
         raise HTTPException(status_code=400, detail="テキストが長すぎます(20万文字以内)")
 
     masked_text, detections = mask_text(request.text, entities=entities, style=style)
+    audit_log.log_text_request(request.text, style, entities, detections)
     return {"masked_text": masked_text, "detections": detections}
 
 
@@ -119,9 +120,11 @@ async def mask_file_endpoint(
     }
 
     try:
-        masked_bytes, detections = handlers[ext](raw, entity_list, style)
+        masked_bytes, detections, raw_text = handlers[ext](raw, entity_list, style)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    audit_log.log_file_request(filename, ext, style, entity_list, detections, raw_text)
 
     media_type = MEDIA_TYPES[ext]
 

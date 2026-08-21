@@ -36,7 +36,7 @@ def mask_plain_text_file(raw: bytes, entities: list, style: str):
     """.txt ファイルをマスキングする。"""
     text, _encoding = decode_bytes(raw)
     masked_text, detections = mask_text(text, entities=entities, style=style)
-    return masked_text.encode("utf-8-sig"), detections
+    return masked_text.encode("utf-8-sig"), detections, text
 
 
 def mask_csv_file(raw: bytes, entities: list, style: str):
@@ -74,19 +74,21 @@ def mask_csv_file(raw: bytes, entities: list, style: str):
     writer = csv.writer(output, dialect=dialect)
     writer.writerows(masked_rows)
 
-    return output.getvalue().encode("utf-8-sig"), all_detections
+    return output.getvalue().encode("utf-8-sig"), all_detections, text
 
 
 def mask_xlsx_file(raw: bytes, entities: list, style: str):
     """.xlsx ファイルの各セルをマスキングする。シート・書式は保持する。"""
     workbook = openpyxl.load_workbook(io.BytesIO(raw))
     all_detections = []
+    original_texts = []
 
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
                 if not isinstance(cell.value, str) or not cell.value:
                     continue
+                original_texts.append(cell.value)
                 masked, detections = mask_text(cell.value, entities=entities, style=style)
                 if masked != cell.value:
                     cell.value = masked
@@ -98,10 +100,10 @@ def mask_xlsx_file(raw: bytes, entities: list, style: str):
 
     output = io.BytesIO()
     workbook.save(output)
-    return output.getvalue(), all_detections
+    return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
-def _mask_paragraph_runs(paragraph, entities: list, style: str):
+def _mask_paragraph_runs(paragraph, entities: list, style: str, original_texts: list):
     """段落内のテキストをまとめてマスキングし、先頭の run に書き戻す。
 
     run単位の書式(太字など)は先頭run以外は失われるが、段落の構造・順序は保持する。
@@ -110,6 +112,7 @@ def _mask_paragraph_runs(paragraph, entities: list, style: str):
     if not text.strip() or not paragraph.runs:
         return []
 
+    original_texts.append(text)
     masked, detections = mask_text(text, entities=entities, style=style)
     if masked != text:
         paragraph.runs[0].text = masked
@@ -122,10 +125,11 @@ def mask_docx_file(raw: bytes, entities: list, style: str):
     """.docx ファイルの本文・表・ヘッダー/フッターをマスキングする。"""
     document = Document(io.BytesIO(raw))
     all_detections = []
+    original_texts = []
 
     def process_paragraphs(paragraphs):
         for paragraph in paragraphs:
-            all_detections.extend(_mask_paragraph_runs(paragraph, entities, style))
+            all_detections.extend(_mask_paragraph_runs(paragraph, entities, style, original_texts))
 
     def process_tables(tables):
         for table in tables:
@@ -142,19 +146,20 @@ def mask_docx_file(raw: bytes, entities: list, style: str):
 
     output = io.BytesIO()
     document.save(output)
-    return output.getvalue(), all_detections
+    return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
 def mask_pptx_file(raw: bytes, entities: list, style: str):
     """.pptx ファイルのテキストボックス・表をマスキングする。"""
     presentation = Presentation(io.BytesIO(raw))
     all_detections = []
+    original_texts = []
 
     def process_text_frame(text_frame):
         for paragraph in text_frame.paragraphs:
-            all_detections.extend(_mask_paragraph_runs(paragraph, entities, style))
+            all_detections.extend(_mask_paragraph_runs(paragraph, entities, style, original_texts))
 
-    for slide_index, slide in enumerate(presentation.slides):
+    for slide in presentation.slides:
         for shape in slide.shapes:
             if shape.has_text_frame:
                 process_text_frame(shape.text_frame)
@@ -165,7 +170,7 @@ def mask_pptx_file(raw: bytes, entities: list, style: str):
 
     output = io.BytesIO()
     presentation.save(output)
-    return output.getvalue(), all_detections
+    return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
 def mask_pdf_file(raw: bytes, entities: list, style: str):
@@ -177,11 +182,13 @@ def mask_pdf_file(raw: bytes, entities: list, style: str):
     """
     document = fitz.open(stream=raw, filetype="pdf")
     all_detections = []
+    original_texts = []
 
     for page in document:
         page_text = page.get_text("text")
         if not page_text.strip():
             continue
+        original_texts.append(page_text)
 
         results = analyze_resolved(page_text, entities)
         seen = set()
@@ -226,4 +233,4 @@ def mask_pdf_file(raw: bytes, entities: list, style: str):
     output = io.BytesIO()
     document.save(output)
     document.close()
-    return output.getvalue(), all_detections
+    return output.getvalue(), all_detections, "\n\n".join(original_texts)

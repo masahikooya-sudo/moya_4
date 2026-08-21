@@ -68,7 +68,6 @@ SPACY_MODEL=ja_core_news_sm uvicorn app.main:app --reload
 ### Docker
 
 ```bash
-cd masking-tool
 docker compose up --build
 ```
 
@@ -84,6 +83,37 @@ SPACY_MODEL=ja_core_news_sm docker compose up --build
 - `GET /api/entities` — 選択可能なエンティティ種別一覧
 - `POST /api/mask/text` — `{ "text": "...", "entities": ["PERSON", ...], "style": "tag" }`
 - `POST /api/mask/file` — `multipart/form-data` (`file`, `entities`(カンマ区切り, 省略可), `style`)
+
+## 利用ログ(誰が何を入力/アップロードしたか)
+
+すべてのマスキングリクエストについて、`logs/audit.log` (JSON Lines形式) に
+1リクエスト1行で記録します。Docker実行時は `docker-compose.yml` で
+`./logs:/app/logs` をマウントしているため、ホスト側の `logs/audit.log` から
+直接確認できます(標準出力にも出すため `docker compose logs` でも見えます)。
+
+記録内容の例(テキスト直接入力):
+
+```json
+{"type": "text", "style": "tag", "entities_requested": ["PERSON", "EMAIL"], "detection_count": 2, "entities_detected": {"PERSON": 1, "EMAIL": 1}, "timestamp": "2026-08-21T02:00:00+00:00", "input_content": "田中太郎さんのメールは taro@example.com です。"}
+```
+
+ファイルアップロードの場合は `filename` / `extension` も記録され、
+`input_content` にはファイルから抽出した元のテキスト(マスキング前)が入ります。
+
+> **⚠️ 重要な注意点**
+> このツールは個人情報を隠すためのものですが、既定 (`AUDIT_LOG_RAW_INPUT=true`) では
+> `input_content` に**マスキング前の生データ(個人情報を含む可能性がある)**を
+> そのまま記録します。つまりログファイル自体が新たな個人情報の保管場所になります。
+> ログファイルへのアクセス権限・保管期間・削除ポリシーは運用者の責任で管理してください。
+>
+> 生データを記録したくない場合は、環境変数で無効化できます(メタデータ・検出件数のみ記録)。
+>
+> ```bash
+> AUDIT_LOG_RAW_INPUT=false docker compose up --build
+> ```
+
+ログのローテーションは既定で1ファイル10MB・最大5世代分保持します
+(`AUDIT_LOG_MAX_BYTES` / `AUDIT_LOG_BACKUP_COUNT` で変更可能)。
 
 ## 制限事項・今後の改善案
 
