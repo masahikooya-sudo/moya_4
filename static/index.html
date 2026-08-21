@@ -3,66 +3,97 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>日本語マスキングツール</title>
+<title>PII Masking Shield</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header class="app-header">
-    <h1>日本語マスキングツール</h1>
-    <p class="subtitle">Presidio + spaCy(日本語モデル)による個人情報・機密情報のマスキング</p>
+    <div class="brand">
+      <div class="logo">🛡️</div>
+      <div class="brand-text">
+        <h1>PII Masking Shield</h1>
+        <p class="subtitle">Microsoft Presidio 日本語個人情報マスキングシステム</p>
+      </div>
+    </div>
+    <div class="status-badge" id="status-badge"><span class="status-dot"></span><span id="status-label">確認中...</span></div>
   </header>
 
   <main class="container">
-    <nav class="tabs">
-      <button class="tab-btn active" data-tab="text-tab">直接入力</button>
-      <button class="tab-btn" data-tab="file-tab">ファイルアップロード</button>
-    </nav>
+    <div class="card">
+      <section class="field-group">
+        <h2>マスキングモードを選択</h2>
+        <div class="segmented">
+          <label class="segment">
+            <input type="radio" name="style" value="tag" checked>
+            <span class="segment-label">プレースホルダー置換</span>
+            <small>例: [人物名]</small>
+          </label>
+          <label class="segment">
+            <input type="radio" name="style" value="mask">
+            <span class="segment-label">マスク文字</span>
+            <small>例: ****</small>
+          </label>
+          <label class="segment">
+            <input type="radio" name="style" value="redact">
+            <span class="segment-label">完全に削除</span>
+            <small>該当箇所を除去</small>
+          </label>
+        </div>
+      </section>
 
-    <section class="entity-panel">
-      <h2>マスキング対象</h2>
-      <div id="entity-checkboxes" class="entity-grid"></div>
-      <div class="entity-actions">
-        <button type="button" id="select-all">すべて選択</button>
-        <button type="button" id="select-none">すべて解除</button>
-      </div>
+      <section class="field-group">
+        <h2>入力方法</h2>
+        <div class="segmented two">
+          <button type="button" class="segment tab-btn active" data-tab="text-tab">
+            <span>T テキスト直接入力</span>
+          </button>
+          <button type="button" class="segment tab-btn" data-tab="file-tab">
+            <span>📄 ファイルアップロード (.txt, .csv)</span>
+          </button>
+        </div>
+      </section>
 
-      <h2>置換方式</h2>
-      <div class="style-options">
-        <label><input type="radio" name="style" value="tag" checked> タグ置換 例: [人物名]</label>
-        <label><input type="radio" name="style" value="mask"> マスク文字(*)</label>
-        <label><input type="radio" name="style" value="redact"> 完全に削除</label>
-      </div>
-    </section>
+      <section class="field-group">
+        <h2>マスキング対象</h2>
+        <div id="entity-checkboxes" class="entity-grid"></div>
+        <div class="entity-actions">
+          <button type="button" id="select-all">すべて選択</button>
+          <button type="button" id="select-none">すべて解除</button>
+        </div>
+      </section>
 
-    <section id="text-tab" class="tab-panel active">
-      <h2>直接入力</h2>
-      <textarea id="input-text" rows="10" placeholder="ここにマスキングしたいテキストを入力してください"></textarea>
-      <button type="button" id="mask-text-btn" class="primary-btn">マスキング実行</button>
+      <section id="text-tab" class="tab-panel active">
+        <h2>入力テキスト</h2>
+        <textarea id="input-text" rows="8" placeholder="個人情報を含むテキストを入力してください...&#10;(例: 田中さん、090-1234-5678、埼玉県草加市瀬崎)"></textarea>
+      </section>
+
+      <section id="file-tab" class="tab-panel">
+        <h2>ファイルアップロード</h2>
+        <p class="hint">テキストファイル(.txt)またはCSVファイル(.csv)をアップロードしてください。</p>
+        <input type="file" id="file-input" accept=".txt,.csv">
+      </section>
+
+      <button type="button" id="mask-btn" class="primary-btn full">🛡️ 個人情報をマスキングする</button>
+
+      <div id="error-box" class="error-box hidden"></div>
 
       <div id="text-result" class="result-box hidden">
         <div class="result-header">
-          <h3>マスキング結果</h3>
+          <h2>マスキング結果</h2>
           <button type="button" id="copy-result-btn">コピー</button>
         </div>
-        <textarea id="output-text" rows="10" readonly></textarea>
+        <textarea id="output-text" rows="8" readonly></textarea>
         <div id="detection-summary" class="detection-summary"></div>
       </div>
-    </section>
-
-    <section id="file-tab" class="tab-panel">
-      <h2>ファイルアップロード</h2>
-      <p class="hint">テキストファイル(.txt)またはCSVファイル(.csv)をアップロードしてください。</p>
-      <input type="file" id="file-input" accept=".txt,.csv">
-      <button type="button" id="mask-file-btn" class="primary-btn">マスキング実行</button>
 
       <div id="file-result" class="result-box hidden">
-        <h3>処理結果</h3>
+        <h2>処理結果</h2>
         <p id="file-result-message"></p>
         <a id="download-link" class="primary-btn" download>マスキング済みファイルをダウンロード</a>
       </div>
-    </section>
+    </div>
 
-    <div id="error-box" class="error-box hidden"></div>
+    <footer class="app-footer">© 2026 PII Masking Shield. All rights reserved. Secured by Microsoft Presidio NLP.</footer>
   </main>
 
   <script src="/static/app.js"></script>

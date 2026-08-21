@@ -1,9 +1,7 @@
-const state = {
-  entities: [],
-};
-
 const entityCheckboxes = document.getElementById("entity-checkboxes");
 const errorBox = document.getElementById("error-box");
+const maskBtn = document.getElementById("mask-btn");
+const maskBtnLabel = maskBtn.textContent;
 
 function showError(message) {
   errorBox.textContent = message;
@@ -25,20 +23,33 @@ function getSelectedStyle() {
   return document.querySelector('input[name="style"]:checked').value;
 }
 
+function setStatus(online) {
+  const badge = document.getElementById("status-badge");
+  const label = document.getElementById("status-label");
+  badge.classList.toggle("offline", !online);
+  label.textContent = online ? "Presidio Active" : "Presidio Offline";
+}
+
 async function loadEntities() {
-  const res = await fetch("/api/entities");
-  const data = await res.json();
-  entityCheckboxes.innerHTML = "";
-  data.entities.forEach((entity) => {
-    const label = document.createElement("label");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.value = entity.code;
-    checkbox.checked = true;
-    label.appendChild(checkbox);
-    label.appendChild(document.createTextNode(`${entity.label} (${entity.code})`));
-    entityCheckboxes.appendChild(label);
-  });
+  try {
+    const res = await fetch("/api/entities");
+    if (!res.ok) throw new Error("failed");
+    const data = await res.json();
+    entityCheckboxes.innerHTML = "";
+    data.entities.forEach((entity) => {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = entity.code;
+      checkbox.checked = true;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(`${entity.label} (${entity.code})`));
+      entityCheckboxes.appendChild(label);
+    });
+    setStatus(true);
+  } catch (e) {
+    setStatus(false);
+  }
 }
 
 document.getElementById("select-all").addEventListener("click", () => {
@@ -59,8 +70,11 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   });
 });
 
-document.getElementById("mask-text-btn").addEventListener("click", async () => {
-  clearError();
+function isFileMode() {
+  return document.getElementById("file-tab").classList.contains("active");
+}
+
+async function maskText() {
   const text = document.getElementById("input-text").value;
   if (!text.trim()) {
     showError("テキストを入力してください。");
@@ -70,60 +84,44 @@ document.getElementById("mask-text-btn").addEventListener("click", async () => {
   const entities = getSelectedEntities();
   const style = getSelectedStyle();
 
-  const btn = document.getElementById("mask-text-btn");
-  btn.disabled = true;
-  btn.textContent = "処理中...";
+  const res = await fetch("/api/mask/text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, entities, style }),
+  });
 
-  try {
-    const res = await fetch("/api/mask/text", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, entities, style }),
-    });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "マスキングに失敗しました。");
+  }
 
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "マスキングに失敗しました。");
-    }
+  const data = await res.json();
+  document.getElementById("output-text").value = data.masked_text;
+  document.getElementById("text-result").classList.remove("hidden");
+  document.getElementById("file-result").classList.add("hidden");
 
-    const data = await res.json();
-    document.getElementById("output-text").value = data.masked_text;
-    document.getElementById("text-result").classList.remove("hidden");
-
-    const summary = document.getElementById("detection-summary");
-    summary.innerHTML = "";
-    const counts = {};
-    data.detections.forEach((d) => {
-      counts[d.entity_label] = (counts[d.entity_label] || 0) + 1;
-    });
-    if (Object.keys(counts).length === 0) {
+  const summary = document.getElementById("detection-summary");
+  summary.innerHTML = "";
+  const counts = {};
+  data.detections.forEach((d) => {
+    counts[d.entity_label] = (counts[d.entity_label] || 0) + 1;
+  });
+  if (Object.keys(counts).length === 0) {
+    const badge = document.createElement("span");
+    badge.className = "detection-badge";
+    badge.textContent = "検出なし";
+    summary.appendChild(badge);
+  } else {
+    Object.entries(counts).forEach(([label, count]) => {
       const badge = document.createElement("span");
       badge.className = "detection-badge";
-      badge.textContent = "検出なし";
+      badge.textContent = `${label}: ${count}件`;
       summary.appendChild(badge);
-    } else {
-      Object.entries(counts).forEach(([label, count]) => {
-        const badge = document.createElement("span");
-        badge.className = "detection-badge";
-        badge.textContent = `${label}: ${count}件`;
-        summary.appendChild(badge);
-      });
-    }
-  } catch (e) {
-    showError(e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "マスキング実行";
+    });
   }
-});
+}
 
-document.getElementById("copy-result-btn").addEventListener("click", async () => {
-  const output = document.getElementById("output-text");
-  await navigator.clipboard.writeText(output.value);
-});
-
-document.getElementById("mask-file-btn").addEventListener("click", async () => {
-  clearError();
+async function maskFile() {
   const fileInput = document.getElementById("file-input");
   const file = fileInput.files[0];
   if (!file) {
@@ -139,37 +137,51 @@ document.getElementById("mask-file-btn").addEventListener("click", async () => {
   formData.append("entities", entities.join(","));
   formData.append("style", style);
 
-  const btn = document.getElementById("mask-file-btn");
-  btn.disabled = true;
-  btn.textContent = "処理中...";
+  const res = await fetch("/api/mask/file", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "マスキングに失敗しました。");
+  }
+
+  const detectionCount = res.headers.get("X-Detection-Count") || "0";
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+
+  const link = document.getElementById("download-link");
+  link.href = url;
+  link.download = `masked_${file.name}`;
+
+  document.getElementById("file-result-message").textContent =
+    `${detectionCount} 件の情報を検出し、マスキングしました。`;
+  document.getElementById("file-result").classList.remove("hidden");
+  document.getElementById("text-result").classList.add("hidden");
+}
+
+document.getElementById("copy-result-btn").addEventListener("click", async () => {
+  const output = document.getElementById("output-text");
+  await navigator.clipboard.writeText(output.value);
+});
+
+maskBtn.addEventListener("click", async () => {
+  clearError();
+  maskBtn.disabled = true;
+  maskBtn.textContent = "処理中...";
 
   try {
-    const res = await fetch("/api/mask/file", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "マスキングに失敗しました。");
+    if (isFileMode()) {
+      await maskFile();
+    } else {
+      await maskText();
     }
-
-    const detectionCount = res.headers.get("X-Detection-Count") || "0";
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-
-    const link = document.getElementById("download-link");
-    link.href = url;
-    link.download = `masked_${file.name}`;
-
-    document.getElementById("file-result-message").textContent =
-      `${detectionCount} 件の情報を検出し、マスキングしました。`;
-    document.getElementById("file-result").classList.remove("hidden");
   } catch (e) {
     showError(e.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = "マスキング実行";
+    maskBtn.disabled = false;
+    maskBtn.textContent = maskBtnLabel;
   }
 });
 
