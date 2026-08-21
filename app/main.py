@@ -9,7 +9,23 @@ from pydantic import BaseModel, Field
 
 from . import config
 from .engine import mask_text
-from .file_processing import mask_csv_file, mask_plain_text_file
+from .file_processing import (
+    mask_csv_file,
+    mask_docx_file,
+    mask_pdf_file,
+    mask_plain_text_file,
+    mask_pptx_file,
+    mask_xlsx_file,
+)
+
+MEDIA_TYPES = {
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".pdf": "application/pdf",
+}
 
 app = FastAPI(title="日本語マスキングツール")
 
@@ -85,22 +101,29 @@ async def mask_file_endpoint(
 
     filename = file.filename or "upload"
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in (".txt", ".csv"):
-        raise HTTPException(status_code=400, detail="txt / csv ファイルのみアップロードできます")
+    if ext not in config.SUPPORTED_EXTENSIONS:
+        supported = " / ".join(config.SUPPORTED_EXTENSIONS)
+        raise HTTPException(status_code=400, detail=f"対応していないファイル形式です({supported} のみ)")
 
     raw = await file.read()
     if len(raw) > config.MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=400, detail="ファイルサイズが上限を超えています")
 
+    handlers = {
+        ".csv": mask_csv_file,
+        ".txt": mask_plain_text_file,
+        ".xlsx": mask_xlsx_file,
+        ".docx": mask_docx_file,
+        ".pptx": mask_pptx_file,
+        ".pdf": mask_pdf_file,
+    }
+
     try:
-        if ext == ".csv":
-            masked_bytes, detections = mask_csv_file(raw, entity_list, style)
-            media_type = "text/csv"
-        else:
-            masked_bytes, detections = mask_plain_text_file(raw, entity_list, style)
-            media_type = "text/plain"
+        masked_bytes, detections = handlers[ext](raw, entity_list, style)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    media_type = MEDIA_TYPES[ext]
 
     download_name = f"masked_{filename}"
     headers = {

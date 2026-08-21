@@ -7,8 +7,11 @@ SPACY_MODEL = os.environ.get("SPACY_MODEL", "ja_core_news_lg")
 # Presidioの検出スコアしきい値（0.0〜1.0）。低いほど検出漏れは減るが誤検出は増える。
 DEFAULT_SCORE_THRESHOLD = float(os.environ.get("SCORE_THRESHOLD", "0.35"))
 
-# アップロードファイルの最大サイズ（バイト）。既定10MB。
-MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", str(10 * 1024 * 1024)))
+# アップロードファイルの最大サイズ（バイト）。既定20MB(Office系は画像を含みやすいため)。
+MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", str(20 * 1024 * 1024)))
+
+# アップロード可能な拡張子ごとの種別。file_processing.py のディスパッチで使用する。
+SUPPORTED_EXTENSIONS = (".txt", ".csv", ".xlsx", ".docx", ".pptx", ".pdf")
 
 # サポートするエンティティ種別と日本語表示名、タグ置換時の表示ラベル。
 ENTITY_DEFINITIONS = [

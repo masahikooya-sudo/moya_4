@@ -138,6 +138,17 @@ def analyze_text(text: str, entities: list, score_threshold: float = None):
     )
 
 
+def analyze_resolved(text: str, entities: list = None, score_threshold: float = None):
+    """重複解決済みの検出結果一覧を返す。ファイル処理側でも共通利用する。"""
+    if not entities:
+        entities = config.ALL_ENTITY_CODES
+
+    if not text:
+        return []
+
+    return _resolve_overlaps(analyze_text(text, entities, score_threshold))
+
+
 def mask_text(text: str, entities: list = None, style: str = "tag", score_threshold: float = None):
     """テキストをマスキングし、(マスキング後テキスト, 検出結果一覧) を返す。"""
     if not entities:
@@ -146,7 +157,7 @@ def mask_text(text: str, entities: list = None, style: str = "tag", score_thresh
     if not text:
         return "", []
 
-    results = _resolve_overlaps(analyze_text(text, entities, score_threshold))
+    results = analyze_resolved(text, entities, score_threshold)
 
     anonymizer = get_anonymizer()
     operators = _build_operators(style, entities)
