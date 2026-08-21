@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日本語マスキングツール</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>日本語マスキングツール</h1>
+    <p class="subtitle">Presidio + spaCy(日本語モデル)による個人情報・機密情報のマスキング</p>
+  </header>
+
+  <main class="container">
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="text-tab">直接入力</button>
+      <button class="tab-btn" data-tab="file-tab">ファイルアップロード</button>
+    </nav>
+
+    <section class="entity-panel">
+      <h2>マスキング対象</h2>
+      <div id="entity-checkboxes" class="entity-grid"></div>
+      <div class="entity-actions">
+        <button type="button" id="select-all">すべて選択</button>
+        <button type="button" id="select-none">すべて解除</button>
+      </div>
+
+      <h2>置換方式</h2>
+      <div class="style-options">
+        <label><input type="radio" name="style" value="tag" checked> タグ置換 例: [人物名]</label>
+        <label><input type="radio" name="style" value="mask"> マスク文字(*)</label>
+        <label><input type="radio" name="style" value="redact"> 完全に削除</label>
+      </div>
+    </section>
+
+    <section id="text-tab" class="tab-panel active">
+      <h2>直接入力</h2>
+      <textarea id="input-text" rows="10" placeholder="ここにマスキングしたいテキストを入力してください"></textarea>
+      <button type="button" id="mask-text-btn" class="primary-btn">マスキング実行</button>
+
+      <div id="text-result" class="result-box hidden">
+        <div class="result-header">
+          <h3>マスキング結果</h3>
+          <button type="button" id="copy-result-btn">コピー</button>
+        </div>
+        <textarea id="output-text" rows="10" readonly></textarea>
+        <div id="detection-summary" class="detection-summary"></div>
+      </div>
+    </section>
+
+    <section id="file-tab" class="tab-panel">
+      <h2>ファイルアップロード</h2>
+      <p class="hint">テキストファイル(.txt)またはCSVファイル(.csv)をアップロードしてください。</p>
+      <input type="file" id="file-input" accept=".txt,.csv">
+      <button type="button" id="mask-file-btn" class="primary-btn">マスキング実行</button>
+
+      <div id="file-result" class="result-box hidden">
+        <h3>処理結果</h3>
+        <p id="file-result-message"></p>
+        <a id="download-link" class="primary-btn" download>マスキング済みファイルをダウンロード</a>
+      </div>
+    </section>
+
+    <div id="error-box" class="error-box hidden"></div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

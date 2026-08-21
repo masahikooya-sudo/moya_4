@@ -1,0 +1,11 @@
+services:
+  masking-tool:
+    build:
+      context: .
+      args:
+        SPACY_MODEL: ${SPACY_MODEL:-ja_core_news_lg}
+    ports:
+      - "8000:8000"
+    environment:
+      - SPACY_MODEL=${SPACY_MODEL:-ja_core_news_lg}
+      - SCORE_THRESHOLD=${SCORE_THRESHOLD:-0.35}

@@ -1,0 +1,32 @@
+import os
+
+# spaCyの日本語モデル名。精度重視なら ja_core_news_lg / trf、
+# 動作確認や軽量環境では ja_core_news_sm でも動作する。
+SPACY_MODEL = os.environ.get("SPACY_MODEL", "ja_core_news_lg")
+
+# Presidioの検出スコアしきい値（0.0〜1.0）。低いほど検出漏れは減るが誤検出は増える。
+DEFAULT_SCORE_THRESHOLD = float(os.environ.get("SCORE_THRESHOLD", "0.35"))
+
+# アップロードファイルの最大サイズ（バイト）。既定10MB。
+MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", str(10 * 1024 * 1024)))
+
+# サポートするエンティティ種別と日本語表示名、タグ置換時の表示ラベル。
+ENTITY_DEFINITIONS = [
+    {"code": "PERSON", "label": "人物名"},
+    {"code": "LOCATION", "label": "住所・地名"},
+    {"code": "ORGANIZATION", "label": "企業名・組織名"},
+    {"code": "PHONE_NUMBER", "label": "電話番号"},
+    {"code": "EMAIL", "label": "メールアドレス"},
+    {"code": "MY_NUMBER", "label": "マイナンバー"},
+    {"code": "POSTAL_CODE", "label": "郵便番号"},
+    {"code": "CREDIT_CARD", "label": "クレジットカード番号"},
+    {"code": "BANK_ACCOUNT", "label": "銀行口座番号"},
+    {"code": "PASSPORT", "label": "パスポート番号"},
+    {"code": "DATE", "label": "日付"},
+    {"code": "TIME", "label": "時刻"},
+    {"code": "MONEY", "label": "金額"},
+    {"code": "QUANTITY", "label": "数量"},
+]
+
+ENTITY_LABELS_JA = {item["code"]: item["label"] for item in ENTITY_DEFINITIONS}
+ALL_ENTITY_CODES = [item["code"] for item in ENTITY_DEFINITIONS]
