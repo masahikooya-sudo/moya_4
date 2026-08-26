@@ -68,6 +68,13 @@ body {
   font-size: 0.8rem;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -80,6 +87,27 @@ body {
   font-size: 0.8rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.user-info.hidden {
+  display: none;
+}
+
+.user-info #logout-link {
+  color: var(--accent-b);
+  text-decoration: none;
+}
+
+.user-info #logout-link:hover {
+  text-decoration: underline;
 }
 
 .status-badge.offline {

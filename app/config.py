@@ -21,6 +21,18 @@ AUDIT_LOG_MAX_BYTES = int(os.environ.get("AUDIT_LOG_MAX_BYTES", str(10 * 1024 * 
 AUDIT_LOG_BACKUP_COUNT = int(os.environ.get("AUDIT_LOG_BACKUP_COUNT", "5"))
 AUDIT_LOG_RAW_INPUT = os.environ.get("AUDIT_LOG_RAW_INPUT", "true").lower() == "true"
 
+# Googleログインによるアクセス制御。既定で有効。ローカルでの動作確認等で
+# 一時的に無効化したい場合のみ AUTH_ENABLED=false を指定する。
+AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "true").lower() == "true"
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+# ログインを許可するGoogle Workspaceドメイン(このドメインのアカウントのみアクセス可)。
+GOOGLE_ALLOWED_DOMAIN = os.environ.get("GOOGLE_ALLOWED_DOMAIN", "pdpro.jp")
+# セッションCookieの署名鍵。未設定の場合は起動のたびにランダム生成する(再起動でログイン状態が切れる)。
+SESSION_SECRET_KEY = os.environ.get("SESSION_SECRET_KEY", "")
+# セッションCookieに Secure 属性を付与するか(HTTPS配信時のみ true にする)。
+SESSION_HTTPS_ONLY = os.environ.get("SESSION_HTTPS_ONLY", "false").lower() == "true"
+
 # サポートするエンティティ種別と日本語表示名、タグ置換時の表示ラベル。
 ENTITY_DEFINITIONS = [
     {"code": "PERSON", "label": "人物名"},

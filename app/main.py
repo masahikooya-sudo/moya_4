@@ -1,13 +1,16 @@
 import io
 import os
+import secrets
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
-from . import audit_log, config
+from . import audit_log, auth, config
 from .engine import mask_text
 from .file_processing import (
     mask_csv_file,
@@ -32,6 +35,44 @@ app = FastAPI(title="日本語マスキングツール")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
 VALID_STYLES = {"tag", "mask", "redact"}
+
+PUBLIC_PATHS = {"/login", "/auth/login", "/auth/callback"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """未ログインのアクセスを /login へ誘導する(APIは401を返す)。"""
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if (
+            not config.AUTH_ENABLED
+            or path in PUBLIC_PATHS
+            or path.startswith("/static/")
+            or auth.is_authenticated(request)
+        ):
+            return await call_next(request)
+
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "ログインが必要です"}, status_code=401)
+        return RedirectResponse(url="/login")
+
+
+app.include_router(auth.router)
+
+# ミドルウェアは後から追加したものほど外側(先に実行)になるため、
+# セッションを参照する AuthMiddleware より後に SessionMiddleware を追加する。
+app.add_middleware(AuthMiddleware)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=config.SESSION_SECRET_KEY or secrets.token_hex(32),
+    same_site="lax",
+    https_only=config.SESSION_HTTPS_ONLY,
+)
+
+
+@app.get("/api/me")
+def get_me(request: Request):
+    return request.session.get("user")
 
 
 class MaskTextRequest(BaseModel):

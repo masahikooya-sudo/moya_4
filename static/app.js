@@ -30,6 +30,19 @@ function setStatus(online) {
   label.textContent = online ? "Presidio Active" : "Presidio Offline";
 }
 
+async function loadUser() {
+  try {
+    const res = await fetch("/api/me");
+    if (!res.ok) return;
+    const user = await res.json();
+    if (!user) return;
+    document.getElementById("user-email").textContent = user.email;
+    document.getElementById("user-info").classList.remove("hidden");
+  } catch (e) {
+    // 未ログイン時は何も表示しない(認証無効時など)
+  }
+}
+
 async function loadEntities() {
   try {
     const res = await fetch("/api/entities");
@@ -186,3 +199,4 @@ maskBtn.addEventListener("click", async () => {
 });
 
 loadEntities();
+loadUser();

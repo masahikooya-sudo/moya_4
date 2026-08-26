@@ -41,6 +41,54 @@ Microsoft Presidio と spaCy の日本語モデルを使って、テキスト中
   - マスク文字: `*` に置換
   - 完全に削除: 検出箇所を削除
 
+## Googleログインによるアクセス制御
+
+既定 (`AUTH_ENABLED=true`) では、アプリへのアクセス前にGoogleアカウントでのログインを要求します。
+ログイン後、指定したGoogle Workspaceドメイン(既定: `pdpro.jp`)のアカウントのみアクセスを許可し、
+それ以外のアカウントは `/login` へ差し戻されます。認証・認可は `app/auth.py` / `app/main.py` の
+`AuthMiddleware` で実装しています。
+
+### Google Cloud側の設定
+
+1. [Google Cloud Console](https://console.cloud.google.com/) で対象プロジェクトを開く(なければ作成)。
+2. 「APIとサービス」→「OAuth同意画面」で、ユーザーの種類(社内利用なら「内部」を推奨)や
+   アプリ名等を設定する。
+3. 「APIとサービス」→「認証情報」→「認証情報を作成」→「OAuthクライアントID」で
+   アプリケーションの種類「ウェブアプリケーション」を選択する。
+4. 「承認済みのリダイレクトURI」に、実際に公開するURLの `/auth/callback` を追加する。
+   - 例: `http://localhost:8000/auth/callback`(ローカル確認用)
+   - 例: `https://mask.example.com/auth/callback`(本番用ドメイン)
+5. 発行された「クライアントID」「クライアントシークレット」を控える。
+
+### アプリ側の設定
+
+```bash
+cp .env.example .env
+```
+
+`.env` を編集し、以下を設定する。
+
+| 環境変数 | 説明 |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` | Google Cloud Consoleで発行したクライアントID(必須) |
+| `GOOGLE_CLIENT_SECRET` | 同クライアントシークレット(必須) |
+| `GOOGLE_ALLOWED_DOMAIN` | ログインを許可するGoogle Workspaceドメイン(既定: `pdpro.jp`) |
+| `SESSION_SECRET_KEY` | セッションCookie署名鍵。`openssl rand -hex 32` 等で生成した値を推奨 |
+
+`SESSION_SECRET_KEY` を省略すると起動のたびにランダム生成されるため、再起動でログイン状態が
+切れます(動作確認程度であれば省略可)。`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` が未設定の
+まま `AUTH_ENABLED=true` で起動しようとした場合、アプリは起動時にエラーで停止します
+(意図せず無防備な状態で公開されることを防ぐため)。
+
+ローカルでの動作確認等でログインを一時的に無効化したい場合は `AUTH_ENABLED=false` を指定します。
+
+```bash
+AUTH_ENABLED=false uvicorn app.main:app --reload
+```
+
+社内ネットワーク限定などHTTPSでの配信でない場合は `SESSION_HTTPS_ONLY=false`(既定)のままにします。
+HTTPSでの配信時は `SESSION_HTTPS_ONLY=true` を設定し、セッションCookieに `Secure` 属性を付与してください。
+
 ## セットアップ
 
 ### ローカル実行
@@ -53,10 +101,12 @@ pip install -r requirements.txt
 # 日本語モデルをダウンロード(精度重視: lg / 軽量: sm)
 python -m spacy download ja_core_news_lg
 
+cp .env.example .env   # Google認証の設定(上記参照)
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-ブラウザで `http://localhost:8000` を開くとWeb UIが表示されます。
+ブラウザで `http://localhost:8000` を開くとログイン画面が表示されます。
 
 環境変数 `SPACY_MODEL` で使用するモデルを切り替えられます(既定: `ja_core_news_lg`)。
 動作確認だけしたい場合はダウンロードが軽い `ja_core_news_sm` を指定してください。
@@ -68,6 +118,7 @@ SPACY_MODEL=ja_core_news_sm uvicorn app.main:app --reload
 ### Docker
 
 ```bash
+cp .env.example .env   # Google認証の設定(上記参照)
 docker compose up --build
 ```
 
@@ -83,6 +134,11 @@ SPACY_MODEL=ja_core_news_sm docker compose up --build
 - `GET /api/entities` — 選択可能なエンティティ種別一覧
 - `POST /api/mask/text` — `{ "text": "...", "entities": ["PERSON", ...], "style": "tag" }`
 - `POST /api/mask/file` — `multipart/form-data` (`file`, `entities`(カンマ区切り, 省略可), `style`)
+- `GET /api/me` — ログイン中のユーザー情報(`{"email": ..., "name": ...}`。未ログイン時は `null`)
+- `GET /login` / `GET /auth/login` / `GET /auth/callback` / `GET /logout` — Googleログイン関連
+
+`AUTH_ENABLED=true`(既定)の場合、上記のうち `/login` `/auth/login` `/auth/callback` `/static/*` 以外は
+すべて未ログイン時にアクセスできません(画面は `/login` へリダイレクト、APIは401を返します)。
 
 ## 利用ログ(誰が何を入力/アップロードしたか)
 
