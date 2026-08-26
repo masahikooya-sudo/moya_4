@@ -45,15 +45,21 @@ def _entity_counts(detections: list) -> dict:
     return counts
 
 
-def _write(record: dict, content: str) -> None:
-    record["timestamp"] = datetime.now(timezone.utc).isoformat()
+def _write(user: str, record: dict, content: str) -> None:
+    # "user" を先頭フィールドにするため、record より先に詰める。
+    ordered = {"user": user or "anonymous"}
+    ordered.update(record)
+    ordered["timestamp"] = datetime.now(timezone.utc).isoformat()
     if config.AUDIT_LOG_RAW_INPUT:
-        record["input_content"] = content
-    _logger.info(json.dumps(record, ensure_ascii=False))
+        ordered["input_content"] = content
+    _logger.info(json.dumps(ordered, ensure_ascii=False))
 
 
-def log_text_request(text: str, style: str, entities: list, detections: list) -> None:
+def log_text_request(
+    user: str, text: str, style: str, entities: list, detections: list
+) -> None:
     _write(
+        user,
         {
             "type": "text",
             "style": style,
@@ -66,9 +72,16 @@ def log_text_request(text: str, style: str, entities: list, detections: list) ->
 
 
 def log_file_request(
-    filename: str, ext: str, style: str, entities: list, detections: list, raw_text: str
+    user: str,
+    filename: str,
+    ext: str,
+    style: str,
+    entities: list,
+    detections: list,
+    raw_text: str,
 ) -> None:
     _write(
+        user,
         {
             "type": "file",
             "filename": filename,

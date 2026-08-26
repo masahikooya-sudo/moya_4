@@ -118,20 +118,22 @@ def get_entities():
 
 
 @app.post("/api/mask/text", response_model=MaskTextResponse)
-def mask_text_endpoint(request: MaskTextRequest):
-    entities = _validate_entities(request.entities)
-    style = _validate_style(request.style)
+def mask_text_endpoint(body: MaskTextRequest, request: Request):
+    entities = _validate_entities(body.entities)
+    style = _validate_style(body.style)
 
-    if len(request.text) > 200_000:
+    if len(body.text) > 200_000:
         raise HTTPException(status_code=400, detail="テキストが長すぎます(20万文字以内)")
 
-    masked_text, detections = mask_text(request.text, entities=entities, style=style)
-    audit_log.log_text_request(request.text, style, entities, detections)
+    masked_text, detections = mask_text(body.text, entities=entities, style=style)
+    user_email = auth.get_current_user_email(request)
+    audit_log.log_text_request(user_email, body.text, style, entities, detections)
     return {"masked_text": masked_text, "detections": detections}
 
 
 @app.post("/api/mask/file")
 async def mask_file_endpoint(
+    request: Request,
     file: UploadFile = File(...),
     entities: Optional[str] = Form(default=None, description="カンマ区切りのエンティティ種別"),
     style: str = Form(default="tag"),
@@ -165,7 +167,8 @@ async def mask_file_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    audit_log.log_file_request(filename, ext, style, entity_list, detections, raw_text)
+    user_email = auth.get_current_user_email(request)
+    audit_log.log_file_request(user_email, filename, ext, style, entity_list, detections, raw_text)
 
     media_type = MEDIA_TYPES[ext]
 

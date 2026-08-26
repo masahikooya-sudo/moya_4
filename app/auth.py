@@ -42,6 +42,11 @@ def is_authenticated(request: Request) -> bool:
     return bool(request.session.get("user"))
 
 
+def get_current_user_email(request: Request) -> str | None:
+    user = request.session.get("user")
+    return user.get("email") if user else None
+
+
 def _is_allowed(email: str, hosted_domain: str) -> bool:
     allowed = config.GOOGLE_ALLOWED_DOMAIN
     return hosted_domain == allowed or email.lower().endswith(f"@{allowed.lower()}")

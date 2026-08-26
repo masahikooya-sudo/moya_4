@@ -150,11 +150,13 @@ SPACY_MODEL=ja_core_news_sm docker compose up --build
 記録内容の例(テキスト直接入力):
 
 ```json
-{"type": "text", "style": "tag", "entities_requested": ["PERSON", "EMAIL"], "detection_count": 2, "entities_detected": {"PERSON": 1, "EMAIL": 1}, "timestamp": "2026-08-21T02:00:00+00:00", "input_content": "田中太郎さんのメールは taro@example.com です。"}
+{"user": "taro.tanaka@pdpro.jp", "type": "text", "style": "tag", "entities_requested": ["PERSON", "EMAIL"], "detection_count": 2, "entities_detected": {"PERSON": 1, "EMAIL": 1}, "timestamp": "2026-08-21T02:00:00+00:00", "input_content": "田中太郎さんのメールは taro@example.com です。"}
 ```
 
-ファイルアップロードの場合は `filename` / `extension` も記録され、
-`input_content` にはファイルから抽出した元のテキスト(マスキング前)が入ります。
+先頭の `user` にはログインユーザーのメールアドレスが入ります(`AUTH_ENABLED=false` で
+認証を無効化している場合は `"anonymous"` になります)。ファイルアップロードの場合は
+`filename` / `extension` も記録され、`input_content` にはファイルから抽出した
+元のテキスト(マスキング前)が入ります。
 
 > **⚠️ 重要な注意点**
 > このツールは個人情報を隠すためのものですが、既定 (`AUDIT_LOG_RAW_INPUT=true`) では
