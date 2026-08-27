@@ -1,8 +1,10 @@
 import io
 import json
 import os
+import re
 import secrets
 from typing import List, Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -137,6 +139,19 @@ def _validate_style(style: str) -> str:
     return style
 
 
+def _content_disposition(filename: str) -> str:
+    """日本語等のファイル名にも対応したContent-Dispositionヘッダーを組み立てる。
+
+    HTTPヘッダーはLatin-1でしかエンコードできないため、非ASCII文字を含む
+    ファイル名をそのまま filename= に入れると送出時に例外になる。
+    RFC 6266 の filename*(UTF-8, パーセントエンコード)を併記し、
+    対応していないクライアント向けに ASCII 変換したフォールバックも残す。
+    """
+    ascii_fallback = re.sub(r"[^\x20-\x7e]", "_", filename).replace('"', "'") or "download"
+    encoded = quote(filename, safe="")
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
+
+
 @app.get("/api/entities")
 def get_entities():
     return {"entities": config.ENTITY_DEFINITIONS}
@@ -254,7 +269,7 @@ async def mask_file_endpoint(
 
     download_name = f"masked_{filename}"
     headers = {
-        "Content-Disposition": f'attachment; filename="{download_name}"',
+        "Content-Disposition": _content_disposition(download_name),
         "X-Detection-Count": str(len(detections)),
     }
     return StreamingResponse(io.BytesIO(masked_bytes), media_type=media_type, headers=headers)
