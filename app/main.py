@@ -15,6 +15,7 @@ from .engine import mask_text
 from .file_processing import (
     mask_csv_file,
     mask_docx_file,
+    mask_json_file,
     mask_pdf_file,
     mask_plain_text_file,
     mask_pptx_file,
@@ -28,6 +29,7 @@ MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".pdf": "application/pdf",
+    ".json": "application/json",
 }
 
 app = FastAPI(title="日本語マスキングツール")
@@ -160,6 +162,7 @@ async def mask_file_endpoint(
         ".docx": mask_docx_file,
         ".pptx": mask_pptx_file,
         ".pdf": mask_pdf_file,
+        ".json": mask_json_file,
     }
 
     try:

@@ -4,6 +4,7 @@
 
 import csv
 import io
+import json
 import re
 
 import pymupdf as fitz
@@ -11,8 +12,8 @@ import openpyxl
 from docx import Document
 from pptx import Presentation
 
-from . import config
-from .engine import analyze_resolved, mask_text
+from . import column_matcher, config
+from .engine import analyze_resolved, mask_full_value, mask_text
 
 # 日本のビジネス文書で使われやすい文字コードの候補（優先順）。
 CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp932", "shift_jis", "euc_jp"]
@@ -39,8 +40,22 @@ def mask_plain_text_file(raw: bytes, entities: list, style: str):
     return masked_text.encode("utf-8-sig"), detections, text
 
 
+def _mask_cell(value: str, forced_type, entities: list, style: str):
+    """列名からエンティティ種別が確定している場合はセル全体を強制マスキングし、
+    そうでなければ通常のNERベースの検出でマスキングする。
+    """
+    if forced_type:
+        return mask_full_value(value, forced_type, style)
+    return mask_text(value, entities=entities, style=style)
+
+
 def mask_csv_file(raw: bytes, entities: list, style: str):
-    """.csv ファイルの各セルをマスキングする。行・列構造は保持する。"""
+    """.csv ファイルの各セルをマスキングする。行・列構造は保持する。
+
+    1行目はヘッダー行とみなし、列名(氏名・住所など)からエンティティ種別を
+    推定できた列は、値の内容によらずセル全体をそのエンティティ種別として
+    マスキングする(ヘッダー行自体はマスキング対象外)。
+    """
     text, _encoding = decode_bytes(raw)
 
     # 区切り文字を簡易的に自動判定(カンマ / タブ)。
@@ -55,14 +70,22 @@ def mask_csv_file(raw: bytes, entities: list, style: str):
     rows = list(reader)
 
     all_detections = []
-    masked_rows = []
-    for row_index, row in enumerate(rows):
+    if not rows:
+        return b"", all_detections, text
+
+    header = rows[0]
+    allowed = set(entities or config.ALL_ENTITY_CODES)
+    forced_types = [column_matcher.match_entity_type(h, allowed) for h in header]
+
+    masked_rows = [header]
+    for row_index, row in enumerate(rows[1:], start=1):
         masked_row = []
         for col_index, cell in enumerate(row):
             if not cell:
                 masked_row.append(cell)
                 continue
-            masked_cell, detections = mask_text(cell, entities=entities, style=style)
+            forced_type = forced_types[col_index] if col_index < len(forced_types) else None
+            masked_cell, detections = _mask_cell(cell, forced_type, entities, style)
             masked_row.append(masked_cell)
             for detection in detections:
                 detection["row"] = row_index
@@ -78,18 +101,31 @@ def mask_csv_file(raw: bytes, entities: list, style: str):
 
 
 def mask_xlsx_file(raw: bytes, entities: list, style: str):
-    """.xlsx ファイルの各セルをマスキングする。シート・書式は保持する。"""
+    """.xlsx ファイルの各セルをマスキングする。シート・書式は保持する。
+
+    各シートの先頭行はヘッダー行とみなし、列名(氏名・住所など)から
+    エンティティ種別を推定できた列は、値の内容によらずセル全体をその
+    エンティティ種別としてマスキングする(ヘッダー行自体はマスキング対象外)。
+    """
     workbook = openpyxl.load_workbook(io.BytesIO(raw))
     all_detections = []
     original_texts = []
+    allowed = set(entities or config.ALL_ENTITY_CODES)
 
     for sheet in workbook.worksheets:
-        for row in sheet.iter_rows():
+        header_row_num = sheet.min_row
+        forced_types = {}
+        for cell in next(sheet.iter_rows(min_row=header_row_num, max_row=header_row_num), []):
+            if isinstance(cell.value, str) and cell.value:
+                forced_types[cell.column] = column_matcher.match_entity_type(cell.value, allowed)
+
+        for row in sheet.iter_rows(min_row=header_row_num + 1):
             for cell in row:
                 if not isinstance(cell.value, str) or not cell.value:
                     continue
                 original_texts.append(cell.value)
-                masked, detections = mask_text(cell.value, entities=entities, style=style)
+                forced_type = forced_types.get(cell.column)
+                masked, detections = _mask_cell(cell.value, forced_type, entities, style)
                 if masked != cell.value:
                     cell.value = masked
                 for detection in detections:
@@ -234,3 +270,49 @@ def mask_pdf_file(raw: bytes, entities: list, style: str):
     document.save(output)
     document.close()
     return output.getvalue(), all_detections, "\n\n".join(original_texts)
+
+
+def _mask_json_value(value, key, entities, style, allowed, path, all_detections, original_texts):
+    if isinstance(value, dict):
+        return {
+            k: _mask_json_value(v, k, entities, style, allowed, f"{path}.{k}", all_detections, original_texts)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _mask_json_value(v, key, entities, style, allowed, f"{path}[{i}]", all_detections, original_texts)
+            for i, v in enumerate(value)
+        ]
+    if isinstance(value, str) and value:
+        original_texts.append(value)
+        forced_type = column_matcher.match_entity_type(key, allowed) if key else None
+        masked, detections = _mask_cell(value, forced_type, entities, style)
+        for detection in detections:
+            detection["path"] = path
+        all_detections.extend(detections)
+        return masked
+    return value
+
+
+def mask_json_file(raw: bytes, entities: list, style: str):
+    """.json ファイルをマスキングする。
+
+    レコードの配列(例: [{"氏名": "...", "住所": "..."}, ...])やネストした
+    オブジェクトを再帰的に走査し、文字列の値をマスキングする。オブジェクトの
+    キー名(氏名・住所など)からエンティティ種別を推定できる場合は、値の内容に
+    よらずその値全体をそのエンティティ種別としてマスキングする。
+    """
+    text, _encoding = decode_bytes(raw)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSONの解析に失敗しました: {exc}")
+
+    allowed = set(entities or config.ALL_ENTITY_CODES)
+    all_detections = []
+    original_texts = []
+
+    masked_data = _mask_json_value(data, None, entities, style, allowed, "$", all_detections, original_texts)
+
+    masked_bytes = json.dumps(masked_data, ensure_ascii=False, indent=2).encode("utf-8")
+    return masked_bytes, all_detections, "\n".join(original_texts)

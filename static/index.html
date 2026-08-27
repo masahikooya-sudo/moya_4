@@ -75,8 +75,9 @@
 
       <section id="file-tab" class="tab-panel">
         <h2>ファイルアップロード</h2>
-        <p class="hint">対応形式: テキスト(.txt) / CSV(.csv) / Excel(.xlsx) / Word(.docx) / PowerPoint(.pptx) / PDF(.pdf)</p>
-        <input type="file" id="file-input" accept=".txt,.csv,.xlsx,.docx,.pptx,.pdf">
+        <p class="hint">対応形式: テキスト(.txt) / CSV(.csv) / Excel(.xlsx) / Word(.docx) / PowerPoint(.pptx) / PDF(.pdf) / JSON(.json)</p>
+        <p class="hint">CSV・Excel・JSONは、列名(氏名・住所・ふりがな等)からも対象データを自動判定してマスキングします。</p>
+        <input type="file" id="file-input" accept=".txt,.csv,.xlsx,.docx,.pptx,.pdf,.json">
       </section>
 
       <button type="button" id="mask-btn" class="primary-btn full">🛡️ 個人情報をマスキングする</button>

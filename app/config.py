@@ -11,7 +11,7 @@ DEFAULT_SCORE_THRESHOLD = float(os.environ.get("SCORE_THRESHOLD", "0.35"))
 MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", str(20 * 1024 * 1024)))
 
 # アップロード可能な拡張子ごとの種別。file_processing.py のディスパッチで使用する。
-SUPPORTED_EXTENSIONS = (".txt", ".csv", ".xlsx", ".docx", ".pptx", ".pdf")
+SUPPORTED_EXTENSIONS = (".txt", ".csv", ".xlsx", ".docx", ".pptx", ".pdf", ".json")
 
 # 利用ログ(誰が何を入力/アップロードしたか)の出力先。
 # 注意: AUDIT_LOG_RAW_INPUT を有効にすると、マスキング前の生データ
