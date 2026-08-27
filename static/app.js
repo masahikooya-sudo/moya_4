@@ -112,6 +112,8 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.add("active");
     document.getElementById(btn.dataset.tab).classList.add("active");
     clearError();
+    document.getElementById("text-result").classList.add("hidden");
+    document.getElementById("file-result").classList.add("hidden");
     updateMaskButtonLabel();
   });
 });
