@@ -169,8 +169,19 @@ def _anonymize(text: str, results: list, style: str, entities: list) -> tuple:
     return anonymized.text, detections
 
 
-def mask_text(text: str, entities: list = None, style: str = "tag", score_threshold: float = None):
-    """テキストをマスキングし、(マスキング後テキスト, 検出結果一覧) を返す。"""
+def mask_text(
+    text: str,
+    entities: list = None,
+    style: str = "tag",
+    score_threshold: float = None,
+    confirmed: set = None,
+):
+    """テキストをマスキングし、(マスキング後テキスト, 検出結果一覧) を返す。
+
+    confirmed を指定した場合、検出結果のうち (entity_type, 一致したテキスト) が
+    confirmed に含まれるものだけをマスキング対象とする(候補確認フロー用)。
+    None の場合は従来通り、検出結果を全てマスキングする。
+    """
     if not entities:
         entities = config.ALL_ENTITY_CODES
 
@@ -178,6 +189,10 @@ def mask_text(text: str, entities: list = None, style: str = "tag", score_thresh
         return "", []
 
     results = analyze_resolved(text, entities, score_threshold)
+    if confirmed is not None:
+        results = [
+            r for r in results if (r.entity_type, text[r.start : r.end].strip()) in confirmed
+        ]
     return _anonymize(text, results, style, entities)
 
 

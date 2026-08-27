@@ -1,5 +1,10 @@
-"""テキストファイル・CSVファイル・Office文書・PDFのアップロードを受け取り、
+"""テキストファイル・CSVファイル・Office文書・PDF・JSONのアップロードを受け取り、
 マスキング済みの内容を生成するロジック。
+
+表形式データ(CSV/Excel/JSON)は列名(ヘッダー)からPIIの種別を推定して
+セル全体を強制マスキングできる(column_matcher.py)。列が明確でない自由形式
+データ(txt/docx/pptx/pdf)では、NERによる検出候補を一覧化してユーザーに
+確認してもらってからマスキングする2段階フロー(analyze_*/mask_*)を提供する。
 """
 
 import csv
@@ -18,6 +23,9 @@ from .engine import analyze_resolved, mask_full_value, mask_text
 # 日本のビジネス文書で使われやすい文字コードの候補（優先順）。
 CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp932", "shift_jis", "euc_jp"]
 
+# 分析結果(候補一覧・サンプル値)を画面に表示する際の切り詰め長。
+SAMPLE_MAX_LEN = 60
+
 
 def decode_bytes(raw: bytes) -> tuple[str, str]:
     """バイト列を可能な文字コード候補で順にデコードする。
@@ -33,41 +41,127 @@ def decode_bytes(raw: bytes) -> tuple[str, str]:
     raise ValueError(f"ファイルの文字コードを判定できませんでした: {last_error}")
 
 
-def mask_plain_text_file(raw: bytes, entities: list, style: str):
-    """.txt ファイルをマスキングする。"""
-    text, _encoding = decode_bytes(raw)
-    masked_text, detections = mask_text(text, entities=entities, style=style)
-    return masked_text.encode("utf-8-sig"), detections, text
+def _truncate(text: str, limit: int = SAMPLE_MAX_LEN) -> str:
+    text = text.replace("\n", " ").replace("\r", " ")
+    if len(text) > limit:
+        return text[:limit] + "…"
+    return text
+
+
+def _column_entry(key: str, header: str, allowed: set, sample: str) -> dict:
+    suggested = column_matcher.match_entity_type(header, allowed)
+    return {
+        "key": key,
+        "header": header,
+        "suggested": suggested,
+        "suggested_label": config.ENTITY_LABELS_JA.get(suggested) if suggested else None,
+        "sample": _truncate(sample or ""),
+    }
+
+
+def _collect_candidates(texts, entities) -> list:
+    """複数のテキスト断片からNER検出候補を収集し、(種別,一致文字列)で重複排除する。
+
+    一致文字列は前後の空白・改行を取り除いた上で管理する。PDFのページ抽出テキスト
+    等では検出スパンの末尾に改行を含むことがあり、マスキング側(mask_text/
+    mask_pdf_file)も confirmed の突き合わせ時に同様に strip() するため、
+    ここで揃えておかないと確認済み候補が一致せずマスキングされなくなる。
+    """
+    counts = {}
+    order = []
+    for text in texts:
+        if not text:
+            continue
+        for result in analyze_resolved(text, entities):
+            value = text[result.start : result.end].strip()
+            if not value:
+                continue
+            key = (result.entity_type, value)
+            if key not in counts:
+                counts[key] = 0
+                order.append(key)
+            counts[key] += 1
+
+    return [
+        {
+            "entity_type": entity_type,
+            "entity_label": config.ENTITY_LABELS_JA.get(entity_type, entity_type),
+            "text": value,
+            "sample": _truncate(value),
+            "count": counts[(entity_type, value)],
+        }
+        for entity_type, value in order
+    ]
 
 
 def _mask_cell(value: str, forced_type, entities: list, style: str):
     """列名からエンティティ種別が確定している場合はセル全体を強制マスキングし、
     そうでなければ通常のNERベースの検出でマスキングする。
+
+    forced_type はユーザーが選択したエンティティ種別(entities)に含まれる場合のみ
+    有効とする(画面のチェックボックスを最終的な有効/無効の基準にするため)。
     """
-    if forced_type:
+    if forced_type and (not entities or forced_type in entities):
         return mask_full_value(value, forced_type, style)
     return mask_text(value, entities=entities, style=style)
 
 
-def mask_csv_file(raw: bytes, entities: list, style: str):
-    """.csv ファイルの各セルをマスキングする。行・列構造は保持する。
-
-    1行目はヘッダー行とみなし、列名(氏名・住所など)からエンティティ種別を
-    推定できた列は、値の内容によらずセル全体をそのエンティティ種別として
-    マスキングする(ヘッダー行自体はマスキング対象外)。
-    """
+def mask_plain_text_file(raw: bytes, entities: list, style: str, confirmed: set = None):
+    """.txt ファイルをマスキングする。"""
     text, _encoding = decode_bytes(raw)
+    masked_text, detections = mask_text(text, entities=entities, style=style, confirmed=confirmed)
+    return masked_text.encode("utf-8-sig"), detections, text
 
-    # 区切り文字を簡易的に自動判定(カンマ / タブ)。
+
+def analyze_txt_candidates(raw: bytes, entities: list) -> list:
+    text, _encoding = decode_bytes(raw)
+    return _collect_candidates([text], entities)
+
+
+def _read_csv_rows(raw: bytes):
+    text, _encoding = decode_bytes(raw)
     sample = text[:2048]
     dialect = csv.excel
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
     except csv.Error:
         pass
+    rows = list(csv.reader(io.StringIO(text), dialect))
+    return text, dialect, rows
 
-    reader = csv.reader(io.StringIO(text), dialect)
-    rows = list(reader)
+
+def analyze_csv_columns(raw: bytes, entities: list) -> list:
+    """.csv の列名からエンティティ種別を推定し、確認用の列一覧を返す。"""
+    _text, _dialect, rows = _read_csv_rows(raw)
+    if not rows:
+        return [{"group": None, "columns": []}]
+
+    header = rows[0]
+    data_rows = rows[1:21]  # サンプル値の取得は先頭20行程度で十分
+    allowed = set(entities or config.ALL_ENTITY_CODES)
+
+    columns = []
+    for col_index, col_header in enumerate(header):
+        sample = ""
+        for row in data_rows:
+            if col_index < len(row) and row[col_index]:
+                sample = row[col_index]
+                break
+        columns.append(_column_entry(str(col_index), col_header, allowed, sample))
+
+    return [{"group": None, "columns": columns}]
+
+
+def mask_csv_file(raw: bytes, entities: list, style: str, column_overrides: dict = None):
+    """.csv ファイルの各セルをマスキングする。行・列構造は保持する。
+
+    1行目はヘッダー行とみなし、列名(氏名・住所など)からエンティティ種別を
+    推定できた列は、値の内容によらずセル全体をそのエンティティ種別として
+    マスキングする(ヘッダー行自体はマスキング対象外)。
+    column_overrides を指定した場合、自動判定の代わりにその内容
+    (列インデックスの文字列 -> エンティティ種別 または null)を使用する。
+    """
+    text, dialect, rows = _read_csv_rows(raw)
 
     all_detections = []
     if not rows:
@@ -75,7 +169,10 @@ def mask_csv_file(raw: bytes, entities: list, style: str):
 
     header = rows[0]
     allowed = set(entities or config.ALL_ENTITY_CODES)
-    forced_types = [column_matcher.match_entity_type(h, allowed) for h in header]
+    if column_overrides is not None:
+        forced_types = [column_overrides.get(str(i)) for i in range(len(header))]
+    else:
+        forced_types = [column_matcher.match_entity_type(h, allowed) for h in header]
 
     masked_rows = [header]
     for row_index, row in enumerate(rows[1:], start=1):
@@ -100,12 +197,42 @@ def mask_csv_file(raw: bytes, entities: list, style: str):
     return output.getvalue().encode("utf-8-sig"), all_detections, text
 
 
-def mask_xlsx_file(raw: bytes, entities: list, style: str):
+def analyze_xlsx_columns(raw: bytes, entities: list) -> list:
+    """.xlsx の各シートの列名からエンティティ種別を推定し、確認用の列一覧を返す。"""
+    workbook = openpyxl.load_workbook(io.BytesIO(raw))
+    allowed = set(entities or config.ALL_ENTITY_CODES)
+    groups = []
+
+    for sheet in workbook.worksheets:
+        header_row_num = sheet.min_row
+        header_cells = list(next(sheet.iter_rows(min_row=header_row_num, max_row=header_row_num), []))
+
+        samples = {}
+        for row in sheet.iter_rows(min_row=header_row_num + 1, max_row=header_row_num + 21):
+            for cell in row:
+                if cell.column not in samples and isinstance(cell.value, str) and cell.value:
+                    samples[cell.column] = cell.value
+
+        columns = []
+        for cell in header_cells:
+            if not isinstance(cell.value, str) or not cell.value:
+                continue
+            key = f"{sheet.title}:{cell.column}"
+            columns.append(_column_entry(key, cell.value, allowed, samples.get(cell.column, "")))
+
+        groups.append({"group": sheet.title, "columns": columns})
+
+    return groups
+
+
+def mask_xlsx_file(raw: bytes, entities: list, style: str, column_overrides: dict = None):
     """.xlsx ファイルの各セルをマスキングする。シート・書式は保持する。
 
     各シートの先頭行はヘッダー行とみなし、列名(氏名・住所など)から
     エンティティ種別を推定できた列は、値の内容によらずセル全体をその
     エンティティ種別としてマスキングする(ヘッダー行自体はマスキング対象外)。
+    column_overrides を指定した場合、キーは "シート名:列番号" とし、
+    自動判定の代わりにその内容を使用する。
     """
     workbook = openpyxl.load_workbook(io.BytesIO(raw))
     all_detections = []
@@ -116,7 +243,11 @@ def mask_xlsx_file(raw: bytes, entities: list, style: str):
         header_row_num = sheet.min_row
         forced_types = {}
         for cell in next(sheet.iter_rows(min_row=header_row_num, max_row=header_row_num), []):
-            if isinstance(cell.value, str) and cell.value:
+            if not isinstance(cell.value, str) or not cell.value:
+                continue
+            if column_overrides is not None:
+                forced_types[cell.column] = column_overrides.get(f"{sheet.title}:{cell.column}")
+            else:
                 forced_types[cell.column] = column_matcher.match_entity_type(cell.value, allowed)
 
         for row in sheet.iter_rows(min_row=header_row_num + 1):
@@ -139,7 +270,7 @@ def mask_xlsx_file(raw: bytes, entities: list, style: str):
     return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
-def _mask_paragraph_runs(paragraph, entities: list, style: str, original_texts: list):
+def _mask_paragraph_runs(paragraph, entities: list, style: str, original_texts: list, confirmed: set = None):
     """段落内のテキストをまとめてマスキングし、先頭の run に書き戻す。
 
     run単位の書式(太字など)は先頭run以外は失われるが、段落の構造・順序は保持する。
@@ -149,7 +280,7 @@ def _mask_paragraph_runs(paragraph, entities: list, style: str, original_texts: 
         return []
 
     original_texts.append(text)
-    masked, detections = mask_text(text, entities=entities, style=style)
+    masked, detections = mask_text(text, entities=entities, style=style, confirmed=confirmed)
     if masked != text:
         paragraph.runs[0].text = masked
         for run in paragraph.runs[1:]:
@@ -157,7 +288,34 @@ def _mask_paragraph_runs(paragraph, entities: list, style: str, original_texts: 
     return detections
 
 
-def mask_docx_file(raw: bytes, entities: list, style: str):
+def _iter_docx_texts(document):
+    """.docx 内の非空段落テキストを、本文・表・ヘッダー/フッターの順に列挙する(読み取り専用)。"""
+
+    def paragraphs_text(paragraphs):
+        for paragraph in paragraphs:
+            if paragraph.text.strip():
+                yield paragraph.text
+
+    def tables_text(tables):
+        for table in tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    yield from paragraphs_text(cell.paragraphs)
+                    yield from tables_text(cell.tables)
+
+    yield from paragraphs_text(document.paragraphs)
+    yield from tables_text(document.tables)
+    for section in document.sections:
+        yield from paragraphs_text(section.header.paragraphs)
+        yield from paragraphs_text(section.footer.paragraphs)
+
+
+def analyze_docx_candidates(raw: bytes, entities: list) -> list:
+    document = Document(io.BytesIO(raw))
+    return _collect_candidates(_iter_docx_texts(document), entities)
+
+
+def mask_docx_file(raw: bytes, entities: list, style: str, confirmed: set = None):
     """.docx ファイルの本文・表・ヘッダー/フッターをマスキングする。"""
     document = Document(io.BytesIO(raw))
     all_detections = []
@@ -165,7 +323,9 @@ def mask_docx_file(raw: bytes, entities: list, style: str):
 
     def process_paragraphs(paragraphs):
         for paragraph in paragraphs:
-            all_detections.extend(_mask_paragraph_runs(paragraph, entities, style, original_texts))
+            all_detections.extend(
+                _mask_paragraph_runs(paragraph, entities, style, original_texts, confirmed)
+            )
 
     def process_tables(tables):
         for table in tables:
@@ -185,7 +345,28 @@ def mask_docx_file(raw: bytes, entities: list, style: str):
     return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
-def mask_pptx_file(raw: bytes, entities: list, style: str):
+def _iter_pptx_texts(presentation):
+    """.pptx 内の非空段落テキストを、スライド・図形の順に列挙する(読み取り専用)。"""
+    for slide in presentation.slides:
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    if paragraph.text.strip():
+                        yield paragraph.text
+            if shape.has_table:
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.text_frame.paragraphs:
+                            if paragraph.text.strip():
+                                yield paragraph.text
+
+
+def analyze_pptx_candidates(raw: bytes, entities: list) -> list:
+    presentation = Presentation(io.BytesIO(raw))
+    return _collect_candidates(_iter_pptx_texts(presentation), entities)
+
+
+def mask_pptx_file(raw: bytes, entities: list, style: str, confirmed: set = None):
     """.pptx ファイルのテキストボックス・表をマスキングする。"""
     presentation = Presentation(io.BytesIO(raw))
     all_detections = []
@@ -193,7 +374,9 @@ def mask_pptx_file(raw: bytes, entities: list, style: str):
 
     def process_text_frame(text_frame):
         for paragraph in text_frame.paragraphs:
-            all_detections.extend(_mask_paragraph_runs(paragraph, entities, style, original_texts))
+            all_detections.extend(
+                _mask_paragraph_runs(paragraph, entities, style, original_texts, confirmed)
+            )
 
     for slide in presentation.slides:
         for shape in slide.shapes:
@@ -209,12 +392,22 @@ def mask_pptx_file(raw: bytes, entities: list, style: str):
     return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
-def mask_pdf_file(raw: bytes, entities: list, style: str):
+def analyze_pdf_candidates(raw: bytes, entities: list) -> list:
+    document = fitz.open(stream=raw, filetype="pdf")
+    try:
+        texts = [page.get_text("text") for page in document]
+    finally:
+        document.close()
+    return _collect_candidates(texts, entities)
+
+
+def mask_pdf_file(raw: bytes, entities: list, style: str, confirmed: set = None):
     """.pdf ファイルをマスキングする。
 
     PDFはテキストをその場で書き換えると元のレイアウトが崩れるため、検出箇所を
     黒塗り(redaction)することでマスキングする。style に応じて黒塗り部分に
-    ラベルやマスク文字を重ねて表示する。
+    ラベルやマスク文字を重ねて表示する。confirmed を指定した場合、
+    (entity_type, 一致テキスト) が confirmed に含まれる検出のみ黒塗りする。
     """
     document = fitz.open(stream=raw, filetype="pdf")
     all_detections = []
@@ -230,6 +423,8 @@ def mask_pdf_file(raw: bytes, entities: list, style: str):
         seen = set()
         for result in results:
             matched_text = page_text[result.start : result.end].strip()
+            if confirmed is not None and (result.entity_type, matched_text) not in confirmed:
+                continue
             search_query = re.sub(r"\s+", " ", matched_text).strip()
             if not search_query or search_query in seen:
                 continue
@@ -272,20 +467,27 @@ def mask_pdf_file(raw: bytes, entities: list, style: str):
     return output.getvalue(), all_detections, "\n\n".join(original_texts)
 
 
-def _mask_json_value(value, key, entities, style, allowed, path, all_detections, original_texts):
+def _mask_json_value(value, key, entities, style, allowed, path, all_detections, original_texts, overrides=None):
     if isinstance(value, dict):
         return {
-            k: _mask_json_value(v, k, entities, style, allowed, f"{path}.{k}", all_detections, original_texts)
+            k: _mask_json_value(
+                v, k, entities, style, allowed, f"{path}.{k}", all_detections, original_texts, overrides
+            )
             for k, v in value.items()
         }
     if isinstance(value, list):
         return [
-            _mask_json_value(v, key, entities, style, allowed, f"{path}[{i}]", all_detections, original_texts)
+            _mask_json_value(
+                v, key, entities, style, allowed, f"{path}[{i}]", all_detections, original_texts, overrides
+            )
             for i, v in enumerate(value)
         ]
     if isinstance(value, str) and value:
         original_texts.append(value)
-        forced_type = column_matcher.match_entity_type(key, allowed) if key else None
+        if overrides is not None:
+            forced_type = overrides.get(key) if key else None
+        else:
+            forced_type = column_matcher.match_entity_type(key, allowed) if key else None
         masked, detections = _mask_cell(value, forced_type, entities, style)
         for detection in detections:
             detection["path"] = path
@@ -294,13 +496,48 @@ def _mask_json_value(value, key, entities, style, allowed, path, all_detections,
     return value
 
 
-def mask_json_file(raw: bytes, entities: list, style: str):
+def _json_records(data):
+    return data if isinstance(data, list) else [data]
+
+
+def analyze_json_columns(raw: bytes, entities: list) -> list:
+    """.json のトップレベルのキー名からエンティティ種別を推定し、確認用の一覧を返す。
+
+    (配列内の)レコードごとに異なるキー構成である可能性があるため、
+    先頭から最大200レコード分のキーを走査して和集合を取る。
+    """
+    text, _encoding = decode_bytes(raw)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSONの解析に失敗しました: {exc}")
+
+    allowed = set(entities or config.ALL_ENTITY_CODES)
+    samples = {}
+    order = []
+    for record in _json_records(data)[:200]:
+        if not isinstance(record, dict):
+            continue
+        for k, v in record.items():
+            if k not in samples:
+                samples[k] = ""
+                order.append(k)
+            if not samples[k] and isinstance(v, str) and v:
+                samples[k] = v
+
+    columns = [_column_entry(key, key, allowed, samples[key]) for key in order]
+    return [{"group": None, "columns": columns}]
+
+
+def mask_json_file(raw: bytes, entities: list, style: str, column_overrides: dict = None):
     """.json ファイルをマスキングする。
 
     レコードの配列(例: [{"氏名": "...", "住所": "..."}, ...])やネストした
     オブジェクトを再帰的に走査し、文字列の値をマスキングする。オブジェクトの
     キー名(氏名・住所など)からエンティティ種別を推定できる場合は、値の内容に
     よらずその値全体をそのエンティティ種別としてマスキングする。
+    column_overrides を指定した場合、キー名(トップレベルのフィールド名)に対する
+    自動判定を、その内容(キー名 -> エンティティ種別 または null)で上書きする。
     """
     text, _encoding = decode_bytes(raw)
     try:
@@ -312,7 +549,9 @@ def mask_json_file(raw: bytes, entities: list, style: str):
     all_detections = []
     original_texts = []
 
-    masked_data = _mask_json_value(data, None, entities, style, allowed, "$", all_detections, original_texts)
+    masked_data = _mask_json_value(
+        data, None, entities, style, allowed, "$", all_detections, original_texts, column_overrides
+    )
 
     masked_bytes = json.dumps(masked_data, ensure_ascii=False, indent=2).encode("utf-8")
     return masked_bytes, all_detections, "\n".join(original_texts)

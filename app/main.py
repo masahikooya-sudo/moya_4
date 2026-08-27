@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import secrets
 from typing import List, Optional
@@ -13,6 +14,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import audit_log, auth, config
 from .engine import mask_text
 from .file_processing import (
+    analyze_csv_columns,
+    analyze_docx_candidates,
+    analyze_json_columns,
+    analyze_pdf_candidates,
+    analyze_pptx_candidates,
+    analyze_txt_candidates,
+    analyze_xlsx_columns,
     mask_csv_file,
     mask_docx_file,
     mask_json_file,
@@ -30,6 +38,21 @@ MEDIA_TYPES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".pdf": "application/pdf",
     ".json": "application/json",
+}
+
+# 列(ヘッダー)があり、列名から対象データを選択できる形式。
+TABULAR_EXTENSIONS = {".csv", ".xlsx", ".json"}
+# 明確な列を持たず、検出候補を一覧確認してからマスキングする形式。
+FREEFORM_EXTENSIONS = {".txt", ".docx", ".pptx", ".pdf"}
+
+ANALYZE_HANDLERS = {
+    ".csv": analyze_csv_columns,
+    ".xlsx": analyze_xlsx_columns,
+    ".json": analyze_json_columns,
+    ".txt": analyze_txt_candidates,
+    ".docx": analyze_docx_candidates,
+    ".pptx": analyze_pptx_candidates,
+    ".pdf": analyze_pdf_candidates,
 }
 
 app = FastAPI(title="日本語マスキングツール")
@@ -133,18 +156,7 @@ def mask_text_endpoint(body: MaskTextRequest, request: Request):
     return {"masked_text": masked_text, "detections": detections}
 
 
-@app.post("/api/mask/file")
-async def mask_file_endpoint(
-    request: Request,
-    file: UploadFile = File(...),
-    entities: Optional[str] = Form(default=None, description="カンマ区切りのエンティティ種別"),
-    style: str = Form(default="tag"),
-):
-    entity_list = _validate_entities(
-        [e.strip() for e in entities.split(",") if e.strip()] if entities else None
-    )
-    style = _validate_style(style)
-
+async def _read_upload(file: UploadFile) -> tuple:
     filename = file.filename or "upload"
     ext = os.path.splitext(filename)[1].lower()
     if ext not in config.SUPPORTED_EXTENSIONS:
@@ -154,6 +166,58 @@ async def mask_file_endpoint(
     raw = await file.read()
     if len(raw) > config.MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=400, detail="ファイルサイズが上限を超えています")
+
+    return filename, ext, raw
+
+
+@app.post("/api/analyze/file")
+async def analyze_file_endpoint(
+    file: UploadFile = File(...),
+    entities: Optional[str] = Form(default=None, description="カンマ区切りのエンティティ種別"),
+):
+    """アップロードされたファイルをマスキングせずに解析し、確認用の候補を返す。
+
+    表形式(csv/xlsx/json)は列名から推定したエンティティ種別付きの列一覧を、
+    自由形式(txt/docx/pptx/pdf)は検出されたPII候補の一覧を返す。
+    ユーザーはこれを確認・調整した上で /api/mask/file を呼び出す想定。
+    """
+    entity_list = _validate_entities(
+        [e.strip() for e in entities.split(",") if e.strip()] if entities else None
+    )
+    _filename, ext, raw = await _read_upload(file)
+
+    try:
+        if ext in TABULAR_EXTENSIONS:
+            groups = ANALYZE_HANDLERS[ext](raw, entity_list)
+            return {"kind": "tabular", "groups": groups}
+        candidates = ANALYZE_HANDLERS[ext](raw, entity_list)
+        return {"kind": "freeform", "candidates": candidates}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/mask/file")
+async def mask_file_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    entities: Optional[str] = Form(default=None, description="カンマ区切りのエンティティ種別"),
+    style: str = Form(default="tag"),
+    column_overrides: Optional[str] = Form(
+        default=None,
+        description="表形式ファイル向け。列キー(文字列) -> エンティティ種別 または null のJSONオブジェクト。"
+        "指定した場合、列名からの自動判定の代わりに使用する。",
+    ),
+    confirmed_candidates: Optional[str] = Form(
+        default=None,
+        description="自由形式ファイル向け。[{\"entity_type\":..., \"text\":...}, ...] のJSON配列。"
+        "指定した場合、この一覧に含まれる検出のみをマスキング対象とする。",
+    ),
+):
+    entity_list = _validate_entities(
+        [e.strip() for e in entities.split(",") if e.strip()] if entities else None
+    )
+    style = _validate_style(style)
+    filename, ext, raw = await _read_upload(file)
 
     handlers = {
         ".csv": mask_csv_file,
@@ -165,8 +229,21 @@ async def mask_file_endpoint(
         ".json": mask_json_file,
     }
 
+    kwargs = {}
+    if ext in TABULAR_EXTENSIONS and column_overrides:
+        try:
+            kwargs["column_overrides"] = json.loads(column_overrides)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="column_overrides の形式が不正です")
+    elif ext in FREEFORM_EXTENSIONS and confirmed_candidates:
+        try:
+            parsed = json.loads(confirmed_candidates)
+            kwargs["confirmed"] = {(c["entity_type"], c["text"]) for c in parsed}
+        except (json.JSONDecodeError, KeyError, TypeError):
+            raise HTTPException(status_code=400, detail="confirmed_candidates の形式が不正です")
+
     try:
-        masked_bytes, detections, raw_text = handlers[ext](raw, entity_list, style)
+        masked_bytes, detections, raw_text = handlers[ext](raw, entity_list, style, **kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
