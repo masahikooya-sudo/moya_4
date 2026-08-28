@@ -118,6 +118,17 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   });
 });
 
+async function readErrorDetail(res, fallback) {
+  // サーバーが予期しないエラー(500など)でJSON以外の本文を返すことがあるため、
+  // res.json() の失敗自体で例外にしてしまわず、常にフォールバック文言を返す。
+  try {
+    const err = await res.json();
+    return err.detail || fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
 async function maskText() {
   const text = document.getElementById("input-text").value;
   if (!text.trim()) {
@@ -135,8 +146,7 @@ async function maskText() {
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "マスキングに失敗しました。");
+    throw new Error(await readErrorDetail(res, "マスキングに失敗しました。"));
   }
 
   const data = await res.json();
@@ -320,8 +330,7 @@ async function analyzeFile() {
 
   const res = await fetch("/api/analyze/file", { method: "POST", body: formData });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "ファイルの解析に失敗しました。");
+    throw new Error(await readErrorDetail(res, "ファイルの解析に失敗しました。"));
   }
   const data = await res.json();
 
@@ -365,8 +374,7 @@ async function performMask() {
   const res = await fetch("/api/mask/file", { method: "POST", body: formData });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "マスキングに失敗しました。");
+    throw new Error(await readErrorDetail(res, "マスキングに失敗しました。"));
   }
 
   const detectionCount = res.headers.get("X-Detection-Count") || "0";

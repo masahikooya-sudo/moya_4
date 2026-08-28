@@ -27,6 +27,26 @@ CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp932", "shift_jis", "euc_jp"]
 SAMPLE_MAX_LEN = 60
 
 
+def _open_document(loader, label: str):
+    """Office/PDFファイルを開く処理を共通化し、失敗時は ValueError に統一する。
+
+    破損したファイルやパスワード保護されたファイルを開こうとすると、各ライブラリは
+    それぞれ異なる例外(RuntimeError, zipfile.BadZipFile, PackageNotFoundError等)を
+    送出する。ここで捕捉せずに main.py まで伝播すると、未対応の例外として
+    500(素のテキスト応答)になりフロントエンドでJSONパースエラーになってしまうため、
+    ValueError に統一し、呼び出し元(main.py)で400として扱えるようにする。
+    """
+    try:
+        return loader()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(
+            f"{label}の読み込みに失敗しました。ファイルが破損しているか、"
+            f"対応していない形式・パスワード保護されている可能性があります: {exc}"
+        )
+
+
 def decode_bytes(raw: bytes) -> tuple[str, str]:
     """バイト列を可能な文字コード候補で順にデコードする。
 
@@ -199,7 +219,7 @@ def mask_csv_file(raw: bytes, entities: list, style: str, column_overrides: dict
 
 def analyze_xlsx_columns(raw: bytes, entities: list) -> list:
     """.xlsx の各シートの列名からエンティティ種別を推定し、確認用の列一覧を返す。"""
-    workbook = openpyxl.load_workbook(io.BytesIO(raw))
+    workbook = _open_document(lambda: openpyxl.load_workbook(io.BytesIO(raw)), "Excelファイル")
     allowed = set(entities or config.ALL_ENTITY_CODES)
     groups = []
 
@@ -234,7 +254,7 @@ def mask_xlsx_file(raw: bytes, entities: list, style: str, column_overrides: dic
     column_overrides を指定した場合、キーは "シート名:列番号" とし、
     自動判定の代わりにその内容を使用する。
     """
-    workbook = openpyxl.load_workbook(io.BytesIO(raw))
+    workbook = _open_document(lambda: openpyxl.load_workbook(io.BytesIO(raw)), "Excelファイル")
     all_detections = []
     original_texts = []
     allowed = set(entities or config.ALL_ENTITY_CODES)
@@ -311,13 +331,13 @@ def _iter_docx_texts(document):
 
 
 def analyze_docx_candidates(raw: bytes, entities: list) -> list:
-    document = Document(io.BytesIO(raw))
+    document = _open_document(lambda: Document(io.BytesIO(raw)), "Wordファイル")
     return _collect_candidates(_iter_docx_texts(document), entities)
 
 
 def mask_docx_file(raw: bytes, entities: list, style: str, confirmed: set = None):
     """.docx ファイルの本文・表・ヘッダー/フッターをマスキングする。"""
-    document = Document(io.BytesIO(raw))
+    document = _open_document(lambda: Document(io.BytesIO(raw)), "Wordファイル")
     all_detections = []
     original_texts = []
 
@@ -362,13 +382,13 @@ def _iter_pptx_texts(presentation):
 
 
 def analyze_pptx_candidates(raw: bytes, entities: list) -> list:
-    presentation = Presentation(io.BytesIO(raw))
+    presentation = _open_document(lambda: Presentation(io.BytesIO(raw)), "PowerPointファイル")
     return _collect_candidates(_iter_pptx_texts(presentation), entities)
 
 
 def mask_pptx_file(raw: bytes, entities: list, style: str, confirmed: set = None):
     """.pptx ファイルのテキストボックス・表をマスキングする。"""
-    presentation = Presentation(io.BytesIO(raw))
+    presentation = _open_document(lambda: Presentation(io.BytesIO(raw)), "PowerPointファイル")
     all_detections = []
     original_texts = []
 
@@ -392,8 +412,16 @@ def mask_pptx_file(raw: bytes, entities: list, style: str, confirmed: set = None
     return output.getvalue(), all_detections, "\n".join(original_texts)
 
 
+def _open_pdf(raw: bytes):
+    document = _open_document(lambda: fitz.open(stream=raw, filetype="pdf"), "PDF")
+    if document.needs_pass:
+        document.close()
+        raise ValueError("パスワードで保護されたPDFは処理できません。")
+    return document
+
+
 def analyze_pdf_candidates(raw: bytes, entities: list) -> list:
-    document = fitz.open(stream=raw, filetype="pdf")
+    document = _open_pdf(raw)
     try:
         texts = [page.get_text("text") for page in document]
     finally:
@@ -409,7 +437,7 @@ def mask_pdf_file(raw: bytes, entities: list, style: str, confirmed: set = None)
     ラベルやマスク文字を重ねて表示する。confirmed を指定した場合、
     (entity_type, 一致テキスト) が confirmed に含まれる検出のみ黒塗りする。
     """
-    document = fitz.open(stream=raw, filetype="pdf")
+    document = _open_pdf(raw)
     all_detections = []
     original_texts = []
 

@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -59,11 +60,30 @@ ANALYZE_HANDLERS = {
 
 app = FastAPI(title="日本語マスキングツール")
 
+logger = logging.getLogger("pii_masking_app")
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
 VALID_STYLES = {"tag", "mask", "redact"}
 
 PUBLIC_PATHS = {"/login", "/auth/login", "/auth/callback"}
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """未対応の例外を捕捉し、JSONで500エラーを返す。
+
+    既定のStarletteの挙動では、未対応の例外は素のテキスト("Internal Server Error")
+    として返され、フロントエンドがレスポンスをJSONとしてパースしようとして失敗する
+    (例: ファイルが破損している等、file_processing.py 側で ValueError に変換し
+    きれなかったケース)。ここでJSONレスポンスに統一し、フロントエンドが常に
+    detail フィールドを読める状態を保証する。詳細はサーバーログに出力する。
+    """
+    logger.exception("Unhandled error while handling %s %s", request.method, request.url.path)
+    return JSONResponse(
+        {"detail": "サーバー内部でエラーが発生しました。しばらくしてから再度お試しください。"},
+        status_code=500,
+    )
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
