@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 
 from . import config
 
@@ -23,9 +23,13 @@ _logger.setLevel(logging.INFO)
 _logger.propagate = False
 
 if not _logger.handlers:
-    _file_handler = RotatingFileHandler(
+    # 日付が変わるタイミング(サーバーのローカル時刻の午前0時)でログファイルを
+    # 分割する。ロール後のファイルは "audit.log.YYYY-MM-DD" という名前になり、
+    # 現在の日付分は常に "audit.log" に書き込まれる。
+    _file_handler = TimedRotatingFileHandler(
         _LOG_PATH,
-        maxBytes=config.AUDIT_LOG_MAX_BYTES,
+        when="midnight",
+        interval=1,
         backupCount=config.AUDIT_LOG_BACKUP_COUNT,
         encoding="utf-8",
     )

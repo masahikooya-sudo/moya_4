@@ -17,8 +17,9 @@ SUPPORTED_EXTENSIONS = (".txt", ".csv", ".xlsx", ".docx", ".pptx", ".pdf", ".jso
 # 注意: AUDIT_LOG_RAW_INPUT を有効にすると、マスキング前の生データ
 # (個人情報を含む可能性がある)がログファイルに保存される。
 AUDIT_LOG_DIR = os.environ.get("AUDIT_LOG_DIR", "logs")
-AUDIT_LOG_MAX_BYTES = int(os.environ.get("AUDIT_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
-AUDIT_LOG_BACKUP_COUNT = int(os.environ.get("AUDIT_LOG_BACKUP_COUNT", "5"))
+# 日付が変わるタイミングでログファイルを分割する(audit.log.YYYY-MM-DD)。
+# 保持する日数(これを超える古いファイルは自動削除される)。
+AUDIT_LOG_BACKUP_COUNT = int(os.environ.get("AUDIT_LOG_BACKUP_COUNT", "30"))
 AUDIT_LOG_RAW_INPUT = os.environ.get("AUDIT_LOG_RAW_INPUT", "true").lower() == "true"
 
 # Googleログインによるアクセス制御。既定で有効。ローカルでの動作確認等で

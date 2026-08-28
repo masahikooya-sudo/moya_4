@@ -214,8 +214,11 @@ SPACY_MODEL=ja_core_news_sm docker compose up --build
 > AUDIT_LOG_RAW_INPUT=false docker compose up --build
 > ```
 
-ログのローテーションは既定で1ファイル10MB・最大5世代分保持します
-(`AUDIT_LOG_MAX_BYTES` / `AUDIT_LOG_BACKUP_COUNT` で変更可能)。
+ログは日付が変わるタイミング(サーバーのローカル時刻の午前0時)で自動的に
+ファイルを分割します。当日分は `logs/audit.log` に、それ以前の分は
+`logs/audit.log.2026-08-27` のように日付ごとのファイルに保存されます。
+既定では直近30日分を保持し、それより古いファイルは自動削除されます
+(`AUDIT_LOG_BACKUP_COUNT` で保持日数を変更可能)。
 
 ## 制限事項・今後の改善案
 
