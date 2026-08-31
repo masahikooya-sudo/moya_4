@@ -37,6 +37,7 @@ SESSION_HTTPS_ONLY = os.environ.get("SESSION_HTTPS_ONLY", "false").lower() == "t
 # サポートするエンティティ種別と日本語表示名、タグ置換時の表示ラベル。
 ENTITY_DEFINITIONS = [
     {"code": "PERSON", "label": "人物名"},
+    {"code": "FURIGANA", "label": "フリガナ"},
     {"code": "LOCATION", "label": "住所・地名"},
     {"code": "ORGANIZATION", "label": "企業名・組織名"},
     {"code": "PHONE_NUMBER", "label": "電話番号"},

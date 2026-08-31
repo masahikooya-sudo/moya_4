@@ -15,16 +15,24 @@ import re
 import pymupdf as fitz
 import openpyxl
 from docx import Document
+from presidio_analyzer import RecognizerResult
 from pptx import Presentation
 
 from . import column_matcher, config
-from .engine import analyze_resolved, mask_full_value, mask_text
+from .engine import analyze_resolved, mask_full_value, mask_resolved, mask_text
 
 # 日本のビジネス文書で使われやすい文字コードの候補（優先順）。
 CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp932", "shift_jis", "euc_jp"]
 
 # 分析結果(候補一覧・サンプル値)を画面に表示する際の切り詰め長。
 SAMPLE_MAX_LEN = 60
+
+# ラベル直後の値を強制マスキング対象とみなす際の判定パラメータ。
+# (PDF/txt等の自由形式文書で「ふりがな」「氏名」等のラベルが単独行として現れ、
+#  直後の行に値が続くフォーム的なレイアウトを補完的に検出するために使う)
+LABEL_LINE_MAX_LEN = 10
+MAX_VALUE_LINES = 3
+MAX_VALUE_LINE_LEN = 40
 
 
 def _open_document(loader, label: str):
@@ -79,6 +87,127 @@ def _column_entry(key: str, header: str, allowed: set, sample: str) -> dict:
     }
 
 
+def _label_forced_results(text: str, allowed_entities: set) -> list:
+    """ラベル直後の値を、ラベルに対応するエンティティ種別として強制検出する。
+
+    履歴書等のPDFフォームでは「ふりがな」「氏名」のようなラベルが単独行として
+    現れ、直後の行に値が続くレイアウトが多い。こうした短い値(特にふりがなや
+    苗字だけの氏名)はNERでは文脈不足のため検出漏れしやすいため、表形式データの
+    列名判定(column_matcher.py)と同じキーワード・判定ロジックを流用して補完する。
+
+    ラベル自体が改行で2行に分割されていることがある(例:「ふりが」+「な」)ため、
+    1行で一致しなければ次の1行と連結しても試す。値は既定で1行のみを対象とする
+    (氏名・ふりがな等は通常1行)が、値の1行目に英数字が含まれる場合はメール
+    アドレスや日付のように複数行に分断されている可能性が高いとみなし、
+    最大 MAX_VALUE_LINES 行までを1つの値として連結する。
+    """
+    if not allowed_entities:
+        return []
+
+    lines = text.split("\n")
+    offsets = []
+    pos = 0
+    for line in lines:
+        offsets.append(pos)
+        pos += len(line) + 1
+
+    def label_type_for(line: str):
+        stripped = line.strip()
+        if not stripped or len(stripped) > LABEL_LINE_MAX_LEN:
+            return None
+        return column_matcher.match_entity_type(stripped, allowed_entities)
+
+    def exact_label_type_for(line: str):
+        stripped = line.strip()
+        if not stripped or len(stripped) > LABEL_LINE_MAX_LEN:
+            return None
+        return column_matcher.match_exact(stripped, allowed_entities)
+
+    results = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        # 1行で完全一致すればそれを優先する(例:「氏 名」→氏名)。
+        # そうでなければ、次の1行と連結して完全一致するか試す
+        # (例:「電話番」+「号」→電話番号)。単独行の部分一致
+        # (例:「電話番」が「電話」に部分一致)は、本来2行に分割された
+        # ラベルの前半に過ぎない場合があり誤判定しやすいため、
+        # 完全一致(単独/連結)がどちらも得られない場合の最終手段とする。
+        label_type = exact_label_type_for(lines[i])
+        consumed = 1
+        if label_type is None and i + 1 < n:
+            combined = lines[i].strip() + lines[i + 1].strip()
+            # 連結時も完全一致のみを許可する(部分一致だと、無関係な2行を
+            # つなげた結果たまたまキーワードを含んでしまうケースを誤判定する)。
+            combined_type = exact_label_type_for(combined)
+            if combined_type is not None:
+                label_type = combined_type
+                consumed = 2
+        if label_type is None:
+            label_type = label_type_for(lines[i])
+            consumed = 1
+
+        if label_type is None:
+            i += 1
+            continue
+
+        j = i + consumed
+        value_end = None
+        k = j
+        taken = 0
+        while k < n and taken < MAX_VALUE_LINES:
+            candidate = lines[k].strip()
+            if not candidate or len(candidate) > MAX_VALUE_LINE_LEN or label_type_for(lines[k]) is not None:
+                break
+            value_end = k
+            taken += 1
+            if taken == 1 and not re.search(r"[A-Za-z0-9]", candidate):
+                # 氏名・ふりがな等は通常1行の値のため、英数字を含まない場合は
+                # ここで打ち切る(次のフィールドのラベルを値として巻き込まないため)。
+                break
+            k += 1
+
+        if value_end is not None:
+            start = offsets[j]
+            end = offsets[value_end] + len(lines[value_end])
+            span = text[start:end]
+            m = re.search(r"\S[\s\S]*\S|\S", span)
+            if m:
+                results.append(
+                    RecognizerResult(
+                        entity_type=label_type,
+                        start=start + m.start(),
+                        end=start + m.end(),
+                        score=0.95,
+                    )
+                )
+            i = value_end + 1
+        else:
+            i = j
+
+    return results
+
+
+def _analyze_with_label_hints(text: str, entities: list) -> list:
+    """NERの検出結果に、ラベル直後の値の強制検出(_label_forced_results)を
+    マージして返す。ラベルに基づく検出は確実性が高いため、重複するNER結果より
+    優先して採用する。
+    """
+    allowed = set(entities or config.ALL_ENTITY_CODES)
+    ner_results = analyze_resolved(text, entities)
+    label_results = _label_forced_results(text, allowed)
+    if not label_results:
+        return ner_results
+
+    occupied = [(r.start, r.end) for r in label_results]
+    merged = list(label_results)
+    for result in ner_results:
+        if any(result.start < end and result.end > start for start, end in occupied):
+            continue
+        merged.append(result)
+    return sorted(merged, key=lambda r: r.start)
+
+
 def _collect_candidates(texts, entities) -> list:
     """複数のテキスト断片からNER検出候補を収集し、(種別,一致文字列)で重複排除する。
 
@@ -92,7 +221,7 @@ def _collect_candidates(texts, entities) -> list:
     for text in texts:
         if not text:
             continue
-        for result in analyze_resolved(text, entities):
+        for result in _analyze_with_label_hints(text, entities):
             value = text[result.start : result.end].strip()
             if not value:
                 continue
@@ -129,7 +258,8 @@ def _mask_cell(value: str, forced_type, entities: list, style: str):
 def mask_plain_text_file(raw: bytes, entities: list, style: str, confirmed: set = None):
     """.txt ファイルをマスキングする。"""
     text, _encoding = decode_bytes(raw)
-    masked_text, detections = mask_text(text, entities=entities, style=style, confirmed=confirmed)
+    results = _analyze_with_label_hints(text, entities)
+    masked_text, detections = mask_resolved(text, results, style, entities, confirmed)
     return masked_text.encode("utf-8-sig"), detections, text
 
 
@@ -300,7 +430,8 @@ def _mask_paragraph_runs(paragraph, entities: list, style: str, original_texts: 
         return []
 
     original_texts.append(text)
-    masked, detections = mask_text(text, entities=entities, style=style, confirmed=confirmed)
+    results = _analyze_with_label_hints(text, entities)
+    masked, detections = mask_resolved(text, results, style, entities, confirmed)
     if masked != text:
         paragraph.runs[0].text = masked
         for run in paragraph.runs[1:]:
@@ -420,6 +551,36 @@ def _open_pdf(raw: bytes):
     return document
 
 
+# 黒塗り矩形をわずかに広げるマージン(ポイント)。フォントの描画メトリクスの
+# 誤差により、検出した矩形ぎりぎりに元の文字の断片が残ることがあるため。
+REDACT_PADDING = 1.5
+
+
+def _pad_rect(rect):
+    return fitz.Rect(
+        rect.x0 - REDACT_PADDING,
+        rect.y0 - REDACT_PADDING,
+        rect.x1 + REDACT_PADDING,
+        rect.y1 + REDACT_PADDING,
+    )
+
+
+def _redact_pdf_rect(page, rect, style: str, label: str, source_text: str):
+    rect = _pad_rect(rect)
+    if style == "tag":
+        page.add_redact_annot(
+            rect, text=f"[{label}]", fontname="japan-s",
+            fill=(0, 0, 0), text_color=(1, 1, 1),
+        )
+    elif style == "mask":
+        page.add_redact_annot(
+            rect, text="*" * min(len(source_text), 12), fontname="japan-s",
+            fill=(0, 0, 0), text_color=(1, 1, 1),
+        )
+    else:  # redact
+        page.add_redact_annot(rect, fill=(0, 0, 0))
+
+
 def analyze_pdf_candidates(raw: bytes, entities: list) -> list:
     document = _open_pdf(raw)
     try:
@@ -447,7 +608,7 @@ def mask_pdf_file(raw: bytes, entities: list, style: str, confirmed: set = None)
             continue
         original_texts.append(page_text)
 
-        results = analyze_resolved(page_text, entities)
+        results = _analyze_with_label_hints(page_text, entities)
         seen = set()
         for result in results:
             matched_text = page_text[result.start : result.end].strip()
@@ -458,24 +619,30 @@ def mask_pdf_file(raw: bytes, entities: list, style: str, confirmed: set = None)
                 continue
             seen.add(search_query)
 
+            label = config.ENTITY_LABELS_JA.get(result.entity_type, result.entity_type)
+
             rects = page.search_for(search_query)
             if not rects:
-                continue
+                # PDF内部でテキストが改行等により分断され、空白に置き換えた
+                # 文字列では一致しない場合、空白・改行区切りの断片ごとに
+                # 個別検索してフォールバックする(例: メールアドレスの途中で
+                # 改行されているケース)。
+                segments = [s for s in re.split(r"\s+", matched_text) if s]
+                if len(segments) < 2:
+                    continue
+                rects = [r for segment in segments for r in page.search_for(segment)]
+                if not rects:
+                    continue
 
-            label = config.ENTITY_LABELS_JA.get(result.entity_type, result.entity_type)
-            for rect in rects:
-                if style == "tag":
-                    page.add_redact_annot(
-                        rect, text=f"[{label}]", fontname="japan-s",
-                        fill=(0, 0, 0), text_color=(1, 1, 1),
-                    )
-                elif style == "mask":
-                    page.add_redact_annot(
-                        rect, text="*" * min(len(search_query), 12), fontname="japan-s",
-                        fill=(0, 0, 0), text_color=(1, 1, 1),
-                    )
-                else:  # redact
-                    page.add_redact_annot(rect, fill=(0, 0, 0))
+            # 1つの検出結果が複数の矩形にまたがる場合(改行を挟む場合や、
+            # search_for が複数行にわたって一致を返す場合)、タグ/マスク文字の
+            # 上書き表示は最初の矩形にのみ行い、残りは黒塗りのみとする
+            # (同じラベルが何度も重複表示されるのを避けるため)。
+            for idx, rect in enumerate(rects):
+                if idx == 0:
+                    _redact_pdf_rect(page, rect, style, label, search_query)
+                else:
+                    page.add_redact_annot(_pad_rect(rect), fill=(0, 0, 0))
 
             all_detections.append(
                 {

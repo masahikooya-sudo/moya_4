@@ -85,6 +85,7 @@ PRIORITY_ENTITY_TYPES = {
     "CREDIT_CARD",
     "BANK_ACCOUNT",
     "PASSPORT",
+    "FURIGANA",
 }
 
 
@@ -189,6 +190,31 @@ def mask_text(
         return "", []
 
     results = analyze_resolved(text, entities, score_threshold)
+    if confirmed is not None:
+        results = [
+            r for r in results if (r.entity_type, text[r.start : r.end].strip()) in confirmed
+        ]
+    return _anonymize(text, results, style, entities)
+
+
+def mask_resolved(
+    text: str,
+    results: list,
+    style: str,
+    entities: list = None,
+    confirmed: set = None,
+):
+    """呼び出し側で既に解決済みの検出結果一覧を使ってテキストをマスキングする。
+
+    file_processing.py 側でラベル直後の値の強制検出(_label_forced_results)を
+    NER結果とマージした上でマスキングしたい場合など、analyze_resolved() を
+    自前で呼ばずに結果一覧を直接渡したいケースに使う。
+    """
+    if not entities:
+        entities = config.ALL_ENTITY_CODES
+    if not text:
+        return "", []
+
     if confirmed is not None:
         results = [
             r for r in results if (r.entity_type, text[r.start : r.end].strip()) in confirmed

@@ -66,9 +66,16 @@ class JapaneseSpacyRecognizer(EntityRecognizer):
 
 
 def build_email_recognizer() -> PatternRecognizer:
+    # PDFから抽出したテキストでは、フォームのフィールド幅等の都合で
+    # メールアドレスの途中(@の前後・ドットの前後)に改行や空白が挟まる
+    # ことがある。厳密に空白なしを要求すると検出漏れになるため、
+    # 区切り記号の前後に少量の空白類(改行含む)を許容する。
     pattern = Pattern(
         name="email_pattern",
-        regex=r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
+        regex=(
+            r"[a-zA-Z0-9._%+\-]+\s{0,2}@\s{0,2}[a-zA-Z0-9\-]+"
+            r"(?:\s{0,2}\.\s{0,2}[a-zA-Z0-9\-]+)*\s{0,2}\.\s{0,2}[a-zA-Z]{2,}"
+        ),
         score=0.9,
     )
     return PatternRecognizer(
@@ -77,6 +84,28 @@ def build_email_recognizer() -> PatternRecognizer:
         patterns=[pattern],
         context=["メール", "メールアドレス", "連絡先", "email", "mail"],
         name="JapaneseEmailRecognizer",
+    )
+
+
+def build_furigana_recognizer() -> PatternRecognizer:
+    """氏名のふりがな(カタカナ表記)を検出する。
+
+    「ハシモト タロウ」のように、カタカナの単語が空白区切りで2つ以上
+    連続する文字列をふりがなとみなす。単発のカタカナ語(外来語等)との
+    誤検出を減らすため、2語以上の連続を要求し、文脈語(フリガナ等)が
+    近くにあればスコアを加点する。
+    """
+    pattern = Pattern(
+        name="furigana_pattern",
+        regex=r"(?<![ァ-ヶー])[ァ-ヶー]{2,10}[ 　][ァ-ヶー]{2,10}(?![ァ-ヶー])",
+        score=0.55,
+    )
+    return PatternRecognizer(
+        supported_entity="FURIGANA",
+        supported_language="ja",
+        patterns=[pattern],
+        context=["ふりがな", "フリガナ", "よみがな", "読み仮名", "カナ", "furigana"],
+        name="JapaneseFuriganaRecognizer",
     )
 
 
@@ -222,6 +251,7 @@ def get_all_recognizers():
         JapaneseSpacyRecognizer(),
         JapaneseCreditCardRecognizer(),
         build_email_recognizer(),
+        build_furigana_recognizer(),
         build_phone_recognizer(),
         build_my_number_recognizer(),
         build_postal_code_recognizer(),
