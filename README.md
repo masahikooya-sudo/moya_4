@@ -9,7 +9,7 @@ Microsoft Presidio と spaCy の日本語モデルを使って、テキスト中
 | PERSON | 人物名 | spaCy 日本語NER + ラベル直後の値の補完 |
 | FURIGANA | フリガナ | 正規表現(カタカナ2語以上) + ラベル直後の値の補完 |
 | LOCATION | 住所・地名 | spaCy 日本語NER |
-| ORGANIZATION | 企業名・組織名 | spaCy 日本語NER |
+| ORGANIZATION | 企業名・組織名 | spaCy 日本語NER + 正規表現(法人格の語) |
 | DATE | 日付 | spaCy 日本語NER |
 | TIME | 時刻 | spaCy 日本語NER |
 | MONEY | 金額 | spaCy 日本語NER |
@@ -256,3 +256,8 @@ SPACY_MODEL=ja_core_news_sm docker compose up --build
   補完的に強制マスキングしますが(上記)、対象フィールドが空欄の場合に直後の別フィールドの
   ラベル文字列を誤って値とみなし、過剰にマスキングすることがあります。これは検出漏れよりも
   安全側に倒す設計上のトレードオフです。
+- 会社名は「株式会社」等の法人格を示す語を手がかりに正規表現でも検出します
+  (`app/recognizers.py` の `build_organization_suffix_recognizer`)。法人格の語の直前・直後で
+  地の文と会社名の間に句読点等の区切りが無い場合、会社名の前後の単語を数文字余分に
+  マスキング対象へ含めてしまうことがあります(逆に区切りが強すぎる場合は法人格の語のみが
+  マスキングされ、会社名本体の一部が対象外になることもあります)。

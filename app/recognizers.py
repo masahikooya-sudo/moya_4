@@ -109,6 +109,55 @@ def build_furigana_recognizer() -> PatternRecognizer:
     )
 
 
+# 日本の法人格を示す語。会社名の前後どちらかに付くことが多く、
+# 会社名そのものの文字種(漢字・カタカナ・英数字・記号)は多様なため、
+# この語の有無を手がかりに会社名全体を検出する。
+JP_CORP_SUFFIXES = [
+    "株式会社", "有限会社", "合同会社", "合資会社", "合名会社",
+    "一般社団法人", "公益社団法人", "一般財団法人", "公益財団法人",
+    "特定非営利活動法人", "社会福祉法人", "医療法人", "学校法人", "宗教法人",
+    "監査法人", "税理士法人", "弁護士法人", "行政書士法人", "社会保険労務士法人",
+]
+
+# 会社名本体に使われうる文字種(全角英数字・半角英数字・カナ・漢字・
+# よく使う記号)。ひらがなは含めない: 助詞(と・を・に等)がこの文字種に
+# 該当してしまい、法人格を示す語の前後にある地の文まで際限なく
+# 取り込んでしまう(例:「株式会社ABCと業務提携契約を締結する」)ため。
+# 句読点や括弧も含めないことで、過剰なマッチを一定範囲に抑える。
+_ORG_NAME_BODY = r"[A-Za-zＡ-Ｚａ-ｚ0-9０-９ァ-ヶー一-龠々〆〇&＆．.・\-－]{1,20}"
+
+
+def build_organization_suffix_recognizer() -> PatternRecognizer:
+    """「株式会社」等の法人格を含む会社名を検出する。
+
+    spaCyの日本語NERは、英数字・カタカナ・漢字が混在する会社名
+    (例:「P&Dプロキュアメントサービス株式会社」)や、周囲に文脈が乏しい
+    会社名単体をORGとして検出できないことがある。法人格を示す語は
+    会社名の前後どちらかに付くことがほとんど確実なため、その語を手がかりに
+    会社名全体を正規表現で検出し、NERの検出漏れを補完する。
+    """
+    suffix_alt = "|".join(JP_CORP_SUFFIXES)
+    patterns = [
+        Pattern(
+            name="org_suffix_after",
+            regex=fr"{_ORG_NAME_BODY}(?:{suffix_alt})",
+            score=0.85,
+        ),
+        Pattern(
+            name="org_suffix_before",
+            regex=fr"(?:{suffix_alt}){_ORG_NAME_BODY}",
+            score=0.85,
+        ),
+    ]
+    return PatternRecognizer(
+        supported_entity="ORGANIZATION",
+        supported_language="ja",
+        patterns=patterns,
+        context=["会社", "法人", "取引先", "発注先", "得意先", "仕入先", "御中"],
+        name="JapaneseOrganizationSuffixRecognizer",
+    )
+
+
 def build_phone_recognizer() -> PatternRecognizer:
     patterns = [
         # 携帯電話 (070/080/090) やフリーダイヤル(0120/0800)、固定電話(市外局番あり)
@@ -252,6 +301,7 @@ def get_all_recognizers():
         JapaneseCreditCardRecognizer(),
         build_email_recognizer(),
         build_furigana_recognizer(),
+        build_organization_suffix_recognizer(),
         build_phone_recognizer(),
         build_my_number_recognizer(),
         build_postal_code_recognizer(),

@@ -157,7 +157,16 @@ def _label_forced_results(text: str, allowed_entities: set) -> list:
         taken = 0
         while k < n and taken < MAX_VALUE_LINES:
             candidate = lines[k].strip()
-            if not candidate or len(candidate) > MAX_VALUE_LINE_LEN or label_type_for(lines[k]) is not None:
+            if (
+                not candidate
+                or len(candidate) > MAX_VALUE_LINE_LEN
+                or label_type_for(lines[k]) is not None
+                or re.search(r"[。！？：]", candidate)
+            ):
+                # 句読点・コロンを含む行は、注意書き等の地の文であって
+                # フォームの値そのものではない可能性が高いため値とみなさない
+                # (例:「TEL」の直後に「額欄：金額は税抜金額です。」のような
+                # 注記が続き、無関係な文がラベルの値として誤検出されるのを防ぐ)。
                 break
             value_end = k
             taken += 1
