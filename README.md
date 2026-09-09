@@ -167,6 +167,117 @@ docker compose up --build
 SPACY_MODEL=ja_core_news_sm docker compose up --build
 ```
 
+### Kubernetes(IDCFクラウド等)
+
+`k8s/` ディレクトリに、Kubernetesクラスタへデプロイするためのマニフェスト一式を
+用意している。`kubectl` がIDCFクラウドのクラスタに接続できる状態(`kubectl get nodes`
+で疎通確認できる状態)であることを前提とする。
+
+#### 1. イメージのビルド・プッシュ
+
+IDCFクラウド側のコンテナレジストリのURLを `<REGISTRY>` として、以下のように
+ビルド・プッシュする(レジストリのホスト名やログイン方法はIDCFクラウドの
+ドキュメント・管理コンソールを参照)。
+
+```bash
+docker login <REGISTRY>
+docker build -t <REGISTRY>/moya4:latest .
+docker push <REGISTRY>/moya4:latest
+```
+
+レジストリが認証を要求する場合、Pull用のSecretも作成しておく
+(`k8s/deployment.yaml` の `imagePullSecrets` が参照する)。
+
+```bash
+kubectl create namespace pii-masking-shield
+kubectl create secret docker-registry moya4-registry-cred \
+  --namespace pii-masking-shield \
+  --docker-server=<REGISTRY> \
+  --docker-username=<ユーザー名> \
+  --docker-password=<パスワード>
+```
+
+レジストリが認証不要な場合は `k8s/deployment.yaml` から `imagePullSecrets` の
+記述を削除してよい。
+
+#### 2. `k8s/kustomization.yaml` の編集
+
+`images:` の `newName` を、実際のレジストリのパスに書き換える。
+
+```yaml
+images:
+  - name: moya4
+    newName: <REGISTRY>/moya4
+    newTag: latest
+```
+
+#### 3. Secretの作成(Google認証情報・セッション鍵)
+
+`k8s/secret.example.yaml` はテンプレートなのでそのままでは適用できない。
+以下のように直接作成する(値は上記「Googleログインによるアクセス制御」の
+手順で取得したものを使う)。
+
+```bash
+kubectl create secret generic moya4-secrets \
+  --namespace pii-masking-shield \
+  --from-literal=GOOGLE_CLIENT_ID='xxxxxxxx.apps.googleusercontent.com' \
+  --from-literal=GOOGLE_CLIENT_SECRET='xxxxxxxx' \
+  --from-literal=SESSION_SECRET_KEY="$(openssl rand -hex 32)"
+```
+
+#### 4. 公開ドメインの設定
+
+`k8s/ingress.yaml` の `masking.example.com` を、実際に用意したドメイン名に
+書き換える(`host:` と `tls.hosts` の両方)。このドメインは、Google Cloud
+Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
+(`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
+
+クラスタにIngress Controller(nginx-ingress等)が入っていない場合や、
+cert-managerを使わない場合は以下を調整する。
+
+- `ingressClassName` を、クラスタに実際に入っているIngress Controllerの
+  クラス名に変更する(`kubectl get ingressclass` で確認)。
+- cert-managerを使わない場合は `cert-manager.io/cluster-issuer` の注釈を削除し、
+  `tls.secretName` に指定した名前で証明書のSecretを別途用意するか、
+  `tls:` ブロックごと削除してHTTPで公開する(Googleログインの都合上、
+  本番運用ではHTTPS化を強く推奨する)。
+- Ingress Controllerが無く、代わりにIDCFクラウドのロードバランサーサービスと
+  連携する `type: LoadBalancer` のServiceで公開したい場合は、
+  `k8s/service-loadbalancer.example.yaml` を参考に `kustomization.yaml` の
+  `resources` から `ingress.yaml` を外し、代わりにこのファイルを追加する。
+
+#### 5. 永続ボリューム(監査ログ)
+
+`k8s/pvc.yaml` は既定のStorageClassを使う設定になっている。IDCFクラウドの
+クラスタで利用可能なStorageClassは `kubectl get storageclass` で確認できる。
+既定のStorageClassが無い場合は `pvc.yaml`内の `storageClassName` のコメントを
+外して指定する。
+
+#### 6. 適用・動作確認
+
+```bash
+kubectl apply -k k8s/
+kubectl -n pii-masking-shield rollout status deployment/moya4
+```
+
+起動時にPresidio/spaCyモデルを読み込むため、Podが `Running` になってから
+実際にリクエストを処理できるまで数十秒かかることがある
+(`startupProbe` がこれを待つよう設定済み)。
+
+```bash
+kubectl -n pii-masking-shield get pods
+kubectl -n pii-masking-shield logs -f deployment/moya4
+```
+
+ヘルスチェック用に認証不要の `GET /healthz` を用意している
+(`{"status": "ok"}` を返す)。ドメインを設定する前に動作だけ確認したい場合は、
+ポートフォワードで直接アクセスできる。
+
+```bash
+kubectl -n pii-masking-shield port-forward svc/moya4 8000:80
+# ブラウザで http://localhost:8000 (AUTH_ENABLED=true の場合はログインが必要)
+```
+
 ## API
 
 - `GET /api/entities` — 選択可能なエンティティ種別一覧

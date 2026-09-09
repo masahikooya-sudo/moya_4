@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: moya4-config
+  namespace: pii-masking-shield
+data:
+  # 使用するspaCy日本語モデル。精度重視ならja_core_news_lg(既定)、
+  # 動作確認や省メモリ環境ならja_core_news_smに変更できる。
+  SPACY_MODEL: "ja_core_news_lg"
+  SCORE_THRESHOLD: "0.35"
+  MAX_UPLOAD_SIZE: "20971520"
+  AUDIT_LOG_DIR: "/app/logs"
+  AUDIT_LOG_BACKUP_COUNT: "30"
+  AUDIT_LOG_RAW_INPUT: "true"
+  AUTH_ENABLED: "true"
+  # ログインを許可するGoogle Workspaceドメイン。
+  GOOGLE_ALLOWED_DOMAIN: "pdpro.jp"
+  # Ingress配下でHTTPS終端する構成を前提に、セッションCookieへ
+  # Secure属性を付与する。
+  SESSION_HTTPS_ONLY: "true"

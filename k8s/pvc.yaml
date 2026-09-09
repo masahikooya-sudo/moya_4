@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: moya4-logs
+  namespace: pii-masking-shield
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # 既定のStorageClassを使う場合は storageClassName を省略してよい。
+  # IDCFクラウドのKubernetesで利用可能なStorageClassは
+  # `kubectl get storageclass` で確認できる。既定が無い/別のクラスを
+  # 使いたい場合はコメントを外して指定する。
+  # storageClassName: idcf-block-storage

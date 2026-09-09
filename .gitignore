@@ -4,3 +4,9 @@ __pycache__/
 venv/
 logs/
 .env
+
+# k8s/secret.example.yaml をコピーして作った実際のSecretマニフェストは
+# 誤ってコミットされないようにする(*.example.yaml 自体はコミット対象)。
+k8s/secret.yaml
+k8s/secrets.yaml
+k8s/*.secret.yaml

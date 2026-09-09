@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import secrets
+from contextlib import asynccontextmanager
 from typing import List, Optional
 from urllib.parse import quote
 
@@ -15,7 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import audit_log, auth, config
-from .engine import mask_text
+from .engine import get_analyzer, mask_text
 from .file_processing import (
     analyze_csv_columns,
     analyze_docx_candidates,
@@ -58,15 +59,42 @@ ANALYZE_HANDLERS = {
     ".pdf": analyze_pdf_candidates,
 }
 
-app = FastAPI(title="日本語マスキングツール")
-
 logger = logging.getLogger("pii_masking_app")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Presidio/spaCyの初期化(モデル読み込み)は数秒〜数十秒かかることがある。
+    # 遅延初期化のままだと最初のリクエストがこのコストを負担してしまうため、
+    # 起動時に一度だけ読み込んでおく。これによりサーバーがリクエストを受け付け
+    # 始めた時点でモデルの読み込みも完了していることが保証され、
+    # Kubernetes等のヘルスチェック(/healthz)を素直に使えるようになる。
+    logger.info("Presidio/spaCyエンジンを初期化しています…")
+    get_analyzer()
+    logger.info("初期化が完了しました。リクエストの受付を開始します。")
+    yield
+
+
+app = FastAPI(title="日本語マスキングツール", lifespan=lifespan)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
 VALID_STYLES = {"tag", "mask", "redact"}
 
-PUBLIC_PATHS = {"/login", "/auth/login", "/auth/callback"}
+# /healthz はコンテナオーケストレーター(Kubernetes等)のヘルスチェック用に、
+# ログイン不要・認証ミドルウェアの影響を受けない固定パスとして公開する。
+PUBLIC_PATHS = {"/login", "/auth/login", "/auth/callback", "/healthz"}
+
+
+@app.get("/healthz")
+def healthz():
+    """稼働確認用エンドポイント。認証不要。
+
+    起動時(lifespan)でPresidio/spaCyエンジンの初期化を完了させてから
+    リクエストの受付を開始するため、このエンドポイントが応答している時点で
+    マスキング処理も実行可能な状態にある。
+    """
+    return {"status": "ok"}
 
 
 @app.exception_handler(Exception)

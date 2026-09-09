@@ -1,0 +1,22 @@
+# Ingress Controllerがクラスタに無い場合の代替案。
+# IDCFクラウドのロードバランサーサービスと連携するtype: LoadBalancerの
+# Serviceで直接公開する(この場合 ingress.yaml は使わない)。
+#
+# 使い方: このファイルをコピーしてservice.yamlを上書きするか、
+# kustomization.yamlのresourcesからingress.yamlを外し、
+# 代わりにこのファイルを追加する。
+# TLS終端が無いため、HTTPSにしたい場合は別途対応が必要
+# (例: ロードバランサー側でのTLS終端や、nginx等のサイドカーを追加する)。
+apiVersion: v1
+kind: Service
+metadata:
+  name: moya4
+  namespace: pii-masking-shield
+spec:
+  selector:
+    app: moya4
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: LoadBalancer

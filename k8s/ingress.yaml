@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: moya4
+  namespace: pii-masking-shield
+  annotations:
+    # cert-managerを導入済みの場合、ClusterIssuer名に置き換えて有効化する。
+    # 未導入の場合はこの行を削除し、証明書を別途用意してtls配下の
+    # secretNameに設定するか、暫定的にHTTP公開(tlsブロックごと削除)にする。
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  # クラスタに導入されているIngress Controllerに合わせて変更する
+  # (`kubectl get ingressclass` で確認できる)。
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - masking.example.com # 実際のドメインに置き換える
+      secretName: moya4-tls
+  rules:
+    - host: masking.example.com # 実際のドメインに置き換える(tls配下と同じ値にする)
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: moya4
+                port:
+                  name: http

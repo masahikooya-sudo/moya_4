@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: moya4
+  namespace: pii-masking-shield
+spec:
+  selector:
+    app: moya4
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP

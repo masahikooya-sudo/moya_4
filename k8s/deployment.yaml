@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: moya4
+  namespace: pii-masking-shield
+  labels:
+    app: moya4
+spec:
+  # SESSION_SECRET_KEY(Secretで固定値を設定する前提)や監査ログ用PVCが
+  # ReadWriteOnceであることから、まずは単一レプリカを前提とする。
+  # 複数レプリカにする場合は、セッションストアの共有やログ集約の方式を
+  # 別途検討すること。
+  replicas: 1
+  selector:
+    matchLabels:
+      app: moya4
+  strategy:
+    # 単一レプリカかつ永続ボリュームを使うため、新旧Podが同時に
+    # ボリュームを取り合わないようRecreate(先に旧Podを終了してから
+    # 新Podを起動)にする。
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: moya4
+    spec:
+      # IDCFクラウド内のプライベートレジストリを使う場合、
+      # `kubectl create secret docker-registry moya4-registry-cred ...`
+      # で作成したSecretを指定する。パブリックに公開したイメージを
+      # 使う場合はこのフィールドごと削除してよい。
+      imagePullSecrets:
+        - name: moya4-registry-cred
+      containers:
+        - name: moya4
+          image: moya4:latest # kustomizationのimagesで実際のレジストリに置き換える
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: moya4-config
+            - secretRef:
+                name: moya4-secrets
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          # 起動時にPresidio/spaCyモデルを読み込み終えるまで、
+          # liveness/readinessより緩い基準で待つ(モデル読み込みに
+          # 数十秒かかることがあるため)。最大 10s x 18 = 180秒待つ。
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: moya4-logs

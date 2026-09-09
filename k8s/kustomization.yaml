@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  # secret.example.yaml はテンプレートなので含めない。
+  # moya4-secrets は `kubectl create secret generic` で別途作成すること。
+
+# ここでIDCFクラウドのレジストリの実際のパスに置き換える。
+# 例: images.idcfcloud.net/<your-account>/moya4
+images:
+  - name: moya4
+    newName: REPLACE_WITH_YOUR_REGISTRY/moya4
+    newTag: latest
