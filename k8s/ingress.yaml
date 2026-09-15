@@ -21,14 +21,18 @@ metadata:
     # 未作成の場合はこの行を削除し、証明書を別途用意してtls配下の
     # secretNameに設定するか、暫定的にHTTP公開(tlsブロックごと削除)にする。
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # IDCFクラウドのIngressでTLSを使う場合、事前にコンソールで発行した
+    # SSLポリシーのIDをここに指定しないとLBの生成に失敗する
+    # (`generateLB failed: ... sslpolicy-id annotation is not found`)。
+    ilb.idcfcloud.com/sslpolicy-id: "8d74a56f-3248-43aa-b08b-ee4ad7ab5900"
 spec:
   ingressClassName: idcf-ilb
   tls:
     - hosts:
-        - masking.example.com # 実際のドメインに置き換える
+        - masking.pdpro.jp
       secretName: moya4-tls
   rules:
-    - host: masking.example.com # 実際のドメインに置き換える(tls配下と同じ値にする)
+    - host: masking.pdpro.jp
       http:
         paths:
           - path: /

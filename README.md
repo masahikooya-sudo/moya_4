@@ -227,8 +227,8 @@ kubectl create secret generic moya4-secrets \
 
 #### 4. 公開ドメインの設定
 
-`k8s/ingress.yaml` の `masking.example.com` を、実際に用意したドメイン名に
-書き換える(`host:` と `tls.hosts` の両方)。このドメインは、Google Cloud
+`k8s/ingress.yaml` の `host:` と `tls.hosts` には、実際に用意したドメイン名
+(既定値は `masking.pdpro.jp`)を設定する。このドメインは、Google Cloud
 Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
 (`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
 
@@ -236,6 +236,13 @@ Consoleで登録するOAuthクライアントの「承認済みのリダイレ�
 (`kubectl get ingressclass` で確認。IDCFクラウド コンテナは独自の
 IngressClassを持ち、確認環境では `idcf-ilb` だった。既定値もこれに
 合わせてあるが、環境によって名前が異なる可能性があるので必ず確認すること)。
+
+**IDCFクラウドのIngressでTLS(`tls:`ブロック)を使う場合、事前にコンソールで
+SSLポリシーを発行し、そのIDを `ilb.idcfcloud.com/sslpolicy-id` annotationに
+設定する必要がある。**これが無い(または値が間違っている)と、Ingressの
+`ADDRESS` が割り当てられず、LBの生成に失敗する
+(`kubectl describe ingress moya4` に `generateLB failed: ... sslpolicy-id
+annotation is not found` と表示される)。
 
 cert-managerを使わない場合は `cert-manager.io/cluster-issuer` の注釈を削除し、
 `tls.secretName` に指定した名前で証明書のSecretを別途用意するか、

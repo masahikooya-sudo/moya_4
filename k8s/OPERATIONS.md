@@ -98,6 +98,21 @@ kubectl -n pii-masking-shield get certificate
 kubectl -n pii-masking-shield describe certificate moya4-tls
 ```
 
+### SSLポリシー(IDCFクラウド固有)の設定
+
+IDCFクラウドのIngressで`tls:`ブロックを使う場合、事前にIDCFクラウド コンソール
+でSSLポリシーを発行し、そのIDを `k8s/ingress.yaml` の
+`ilb.idcfcloud.com/sslpolicy-id` annotationに設定する必要がある
+(実機で確認済み)。これが無い、または値が誤っていると、Ingressの`ADDRESS`が
+割り当てられずLBの生成に失敗する。
+
+```bash
+kubectl -n pii-masking-shield describe ingress moya4
+# Warning Error ... generateLB failed: TLS SecretName "moya4-tls" exists,
+# but "ilb.idcfcloud.com/sslpolicy-id" annotation is not found
+# と表示される場合、上記annotationが未設定または値が誤っている。
+```
+
 ## 2. 停止(一時停止・コスト抑制)
 
 **設定やデータ(PVC/ConfigMap/Secret/Service/Ingress)は残したまま、
@@ -205,4 +220,5 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 | Ingress経由でアクセスできない | `ingressClassName` が実際のクラスタの名前と違う | `kubectl get ingressclass`(上記1章参照) |
 | HTTPSでアクセスできない・証明書エラー | ClusterIssuerが無い、または発行に失敗している | `kubectl -n pii-masking-shield describe certificate moya4-tls` |
 | `kubectl apply`が`admission webhook "validate-idcf-ingress.idcfcloud.com" denied`で失敗 | IngressのpathTypeが`ImplementationSpecific`以外になっている(IDCF独自の制約。`k8s/ingress.yaml`は対応済み) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml \| Select-String pathType` |
+| Ingressの`ADDRESS`が割り当てられない・`generateLB failed`エラー | `ilb.idcfcloud.com/sslpolicy-id` annotationが未設定、またはSSLポリシーIDが誤っている | `kubectl -n pii-masking-shield describe ingress moya4` |
 | Googleログインでエラーになる | Ingressのホスト名とGoogle Cloud ConsoleのリダイレクトURIが不一致 | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |
