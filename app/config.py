@@ -19,7 +19,7 @@ SUPPORTED_EXTENSIONS = (".txt", ".csv", ".xlsx", ".docx", ".pptx", ".pdf", ".jso
 AUDIT_LOG_DIR = os.environ.get("AUDIT_LOG_DIR", "logs")
 # 日付が変わるタイミングでログファイルを分割する(audit.log.YYYY-MM-DD)。
 # 保持する日数(これを超える古いファイルは自動削除される)。
-AUDIT_LOG_BACKUP_COUNT = int(os.environ.get("AUDIT_LOG_BACKUP_COUNT", "30"))
+AUDIT_LOG_BACKUP_COUNT = int(os.environ.get("AUDIT_LOG_BACKUP_COUNT", "90"))
 AUDIT_LOG_RAW_INPUT = os.environ.get("AUDIT_LOG_RAW_INPUT", "true").lower() == "true"
 
 # Googleログインによるアクセス制御。既定で有効。ローカルでの動作確認等で

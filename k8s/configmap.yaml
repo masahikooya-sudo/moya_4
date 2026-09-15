@@ -10,7 +10,7 @@ data:
   SCORE_THRESHOLD: "0.35"
   MAX_UPLOAD_SIZE: "20971520"
   AUDIT_LOG_DIR: "/app/logs"
-  AUDIT_LOG_BACKUP_COUNT: "30"
+  AUDIT_LOG_BACKUP_COUNT: "90"
   AUDIT_LOG_RAW_INPUT: "true"
   AUTH_ENABLED: "true"
   # ログインを許可するGoogle Workspaceドメイン。
