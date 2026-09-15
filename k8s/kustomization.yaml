@@ -11,9 +11,9 @@ resources:
   # secret.example.yaml はテンプレートなので含めない。
   # moya4-secrets は `kubectl create secret generic` で別途作成すること。
 
-# ここでIDCFクラウドのレジストリの実際のパスに置き換える。
-# 例: images.idcfcloud.net/<your-account>/moya4
+# GitHub Container Registry(ghcr.io)を使う。IDCFクラウド側のレジストリを
+# 使う場合は newName をそちらの実際のホスト名に置き換える。
 images:
   - name: moya4
-    newName: REPLACE_WITH_YOUR_REGISTRY/moya4
+    newName: ghcr.io/masahikooya-sudo/moya4
     newTag: latest
