@@ -1,3 +1,18 @@
+# IDCFクラウド コンテナ(RKE2ベース)にはnginx Ingress Controllerが
+# 標準で同梱されていることが多い。申し込み済みのILBは、通常この
+# Ingress ControllerのService(type: LoadBalancer、kube-system名前空間)に
+# 割り当てる形で連携する。以下のコマンドで対象のServiceを確認できる。
+#
+#   kubectl get svc -A | grep -i ingress
+#
+# そのServiceに loadbalancer.idcfcloud.com/loadbalancer-class: "ilb" の
+# annotationが付いていない場合は付与する(IDCFクラウドのコンソールで
+# ILBを申し込んだ時点で自動的に設定されていることもあるので、まず
+# 現状を確認すること)。この方式ならIngress Controller1つの背後に
+# 複数アプリを相乗りさせられ、cert-managerによるTLS自動化(下記)も使える。
+#
+# Ingress Controllerを使わずアプリを直接ILBで公開したい場合は、
+# service-loadbalancer.example.yaml を参照。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

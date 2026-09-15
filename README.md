@@ -246,6 +246,12 @@ cert-managerを使わない場合は以下を調整する。
   `k8s/service-loadbalancer.example.yaml` を参考に `kustomization.yaml` の
   `resources` から `ingress.yaml` を外し、代わりにこのファイルを追加する。
 
+ILB(Infinite LB)を既に申し込み済みの場合、通常はIngress ControllerのService
+(`kube-system` 名前空間、`kubectl get svc -A | grep -i ingress` で確認できる)に
+紐付ける形で連携する。紐付けの確認・設定方法や、ILBを直接このアプリの
+Serviceに割り当てる方法(`loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"`
+というannotationを使う)は `k8s/OPERATIONS.md` の「起動」章に詳しく記載している。
+
 #### 5. 永続ボリューム(監査ログ)
 
 `k8s/pvc.yaml` は既定のStorageClassを使う設定になっている。IDCFクラウドの
@@ -277,6 +283,11 @@ kubectl -n pii-masking-shield logs -f deployment/moya4
 kubectl -n pii-masking-shield port-forward svc/moya4 8000:80
 # ブラウザで http://localhost:8000 (AUTH_ENABLED=true の場合はログインが必要)
 ```
+
+#### 起動・停止・更新・削除の手順
+
+初回デプロイ後の日常的な運用(一時停止、バージョン更新、設定変更の反映、
+撤去時の後始末)は `k8s/OPERATIONS.md` にまとめている。
 
 ## API
 
