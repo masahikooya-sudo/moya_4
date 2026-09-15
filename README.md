@@ -227,7 +227,7 @@ kubectl create secret generic moya4-secrets \
 
 #### 4. 公開ドメインの設定
 
-`k8s/ingress.yaml` の `masking.pdpro.jp` を、実際に用意したドメイン名に
+`k8s/ingress.yaml` の `masking.example.com` を、実際に用意したドメイン名に
 書き換える(`host:` と `tls.hosts` の両方)。このドメインは、Google Cloud
 Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
 (`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
@@ -236,37 +236,20 @@ Consoleで登録するOAuthクライアントの「承認済みのリダイレ�
 (`kubectl get ingressclass` で確認。IDCFクラウド コンテナは独自の
 IngressClassを持ち、確認環境では `idcf-ilb` だった。既定値もこれに
 合わせてあるが、環境によって名前が異なる可能性があるので必ず確認すること)。
-またIDCFクラウドのIngressコントローラーは、TLSを使う場合
-`ilb.idcfcloud.com/sslpolicy-id` の注釈でSSLポリシーIDの指定を必須として
-いることを実機で確認した(未指定だと `generateLB failed` エラーになる)。
-IDCFクラウドのコンソールでSSLポリシーを作成し、そのIDを設定すること。
 
-**社内VPN経由でのみアクセスする(ILBがプライベートIP)運用の場合**、
-Let's Encryptの自動発行(cert-manager)は使えない(HTTP-01検証に
-インターネット側からの到達性が必要なため)。既存の証明書ファイル
-(`*.pdpro.jp` のワイルドカード証明書等)を手動でSecretとして登録する。
-
-```bash
-kubectl create secret tls moya4-tls \
-  --namespace pii-masking-shield \
-  --cert=path/to/pdpro.jp.crt \
-  --key=path/to/pdpro.jp.key
-```
-
-この場合、`k8s/ingress.yaml` に `cert-manager.io/cluster-issuer` の注釈は
-付けない(付けるとcert-managerがこのSecretを自動発行対象として管理しようと
-し、手動登録した証明書と競合する)。
-
-**ILBがインターネットから到達可能なパブリックIPの場合**は、代わりに
-cert-managerでの自動発行も使える。ClusterIssuer(証明書の発行元)を
-別途作成する必要がある(`k8s/cluster-issuer.example.yaml` 参照)。
+cert-managerを使わない場合は `cert-manager.io/cluster-issuer` の注釈を削除し、
+`tls.secretName` に指定した名前で証明書のSecretを別途用意するか、
+`tls:` ブロックごと削除してHTTPで公開する(Googleログインの都合上、
+本番運用ではHTTPS化を強く推奨する)。cert-managerを使う場合、
+ClusterIssuer(証明書の発行元)を別途作成する必要がある
+(`k8s/cluster-issuer.example.yaml` 参照)。
 
 Ingressを使わず、代わりにIDCFクラウドのILBをこのアプリのServiceに直接
 割り当てて公開したい場合は、`k8s/service-loadbalancer.example.yaml` を参考に
 `kustomization.yaml` の `resources` から `ingress.yaml` を外し、
 代わりにこのファイルを追加する。
 
-ILB・IngressClass・SSLポリシー・証明書まわりの詳しい確認手順は
+ILB・IngressClass・ClusterIssuerまわりの詳しい確認手順は
 `k8s/OPERATIONS.md` の「起動」章にまとめている。
 
 #### 5. 永続ボリューム(監査ログ)
