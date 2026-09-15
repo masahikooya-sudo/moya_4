@@ -204,4 +204,5 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 | Podは`Running`だが`Ready`にならない | 起動直後でspaCyモデル読み込み中(`startupProbe`待ち、数十秒かかることがある) | `kubectl -n pii-masking-shield logs deployment/moya4` |
 | Ingress経由でアクセスできない | `ingressClassName` が実際のクラスタの名前と違う | `kubectl get ingressclass`(上記1章参照) |
 | HTTPSでアクセスできない・証明書エラー | ClusterIssuerが無い、または発行に失敗している | `kubectl -n pii-masking-shield describe certificate moya4-tls` |
+| `kubectl apply`が`admission webhook "validate-idcf-ingress.idcfcloud.com" denied`で失敗 | IngressのpathTypeが`ImplementationSpecific`以外になっている(IDCF独自の制約。`k8s/ingress.yaml`は対応済み) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml \| Select-String pathType` |
 | Googleログインでエラーになる | Ingressのホスト名とGoogle Cloud ConsoleのリダイレクトURIが不一致 | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |

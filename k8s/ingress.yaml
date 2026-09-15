@@ -32,7 +32,11 @@ spec:
       http:
         paths:
           - path: /
-            pathType: Prefix
+            # IDCFクラウドの独自Ingress用アドミッションWebhook
+            # (validate-idcf-ingress.idcfcloud.com)は、pathTypeとして
+            # ImplementationSpecific以外(Prefix/Exact)を拒否することを
+            # 実機で確認した。標準的なPrefixではなくこちらを使う。
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: moya4
