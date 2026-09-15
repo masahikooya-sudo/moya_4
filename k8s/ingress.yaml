@@ -4,31 +4,41 @@
 # (`kubectl get ingressclass` で確認できる。環境によって名前が異なる
 # 可能性があるため、必ず自分のクラスタで確認してから合わせること)。
 #
-# cert-managerも `idcf-system` 名前空間にプリインストールされているが、
-# ClusterIssuer(証明書の発行元)は自分で作成する必要がある
-# (`kubectl get clusterissuer` で0件なら未作成)。作成手順は
-# k8s/cluster-issuer.example.yaml を参照。
+# このアプリはVPN接続後にのみアクセスするプライベートなILBを使う運用の
+# ため、Let's Encrypt(cert-manager)による自動証明書発行は使わない
+# (HTTP-01検証はインターネット側からの到達性が必要で、プライベートILB
+# では検証できない)。代わりに、既存の *.pdpro.jp ワイルドカード証明書を
+# 手動でSecretとして登録する(下記の「証明書Secretの作成」参照)。
+#
+# また、IDCFクラウドのIngressコントローラーはTLSを使う場合、
+# `ilb.idcfcloud.com/sslpolicy-id` でSSLポリシーのIDを指定することを
+# 必須としている(実機で確認: 未指定だと "generateLB failed" エラーになる)。
+# IDCFクラウドのコンソールでSSLポリシーを作成し、そのIDを下記に設定すること。
 #
 # アプリのServiceに直接ILBを紐づける方式(Ingressを使わない)にしたい場合は
 # service-loadbalancer.example.yaml を参照。
+#
+# --- 証明書Secretの作成(cert-managerを使わない場合) ---
+#   kubectl create secret tls moya4-tls \
+#     --namespace pii-masking-shield \
+#     --cert=path/to/pdpro.jp.crt \
+#     --key=path/to/pdpro.jp.key
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: moya4
   namespace: pii-masking-shield
   annotations:
-    # ClusterIssuerを作成してから有効にする(下記参照)。
-    # 未作成の場合はこの行を削除し、証明書を別途用意してtls配下の
-    # secretNameに設定するか、暫定的にHTTP公開(tlsブロックごと削除)にする。
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # IDCFクラウドのコンソールで作成したSSLポリシーのIDに置き換える。
+    ilb.idcfcloud.com/sslpolicy-id: "REPLACE_WITH_YOUR_SSLPOLICY_ID"
 spec:
   ingressClassName: idcf-ilb
   tls:
     - hosts:
-        - masking.example.com # 実際のドメインに置き換える
+        - masking.pdpro.jp
       secretName: moya4-tls
   rules:
-    - host: masking.example.com # 実際のドメインに置き換える(tls配下と同じ値にする)
+    - host: masking.pdpro.jp
       http:
         paths:
           - path: /

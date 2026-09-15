@@ -73,9 +73,46 @@ Ingressを経由せず、このアプリのServiceに直接ILBを紐づけたい
 Googleログインに必要なHTTPS化は別途対応が必要になる。cert-managerによる
 TLS自動化を使いたい場合はIngress経由の方式を推奨する)。
 
-### TLS証明書(cert-manager)の設定
+### TLS証明書の設定
 
-cert-managerは `idcf-system` 名前空間にプリインストールされているが、
+**ILBがVPN経由でのみ到達可能なプライベートIPの場合**(このアプリの想定運用)、
+cert-managerによるLet's Encrypt自動発行は使えない。Let's EncryptのHTTP-01
+検証はインターネット側からの到達性が必須なため、プライベートILBでは
+検証が失敗する。代わりに、既に持っている証明書ファイル(例: `*.pdpro.jp`の
+ワイルドカード証明書)を手動でSecretとして登録する。
+
+```bash
+kubectl create secret tls moya4-tls \
+  --namespace pii-masking-shield \
+  --cert=path/to/pdpro.jp.crt \
+  --key=path/to/pdpro.jp.key
+```
+
+証明書ファイル(`.crt`/`.pem`)と秘密鍵(`.key`)は、社内で管理しているものを
+使う。中間証明書(チェーン証明書)が別ファイルの場合は、`--cert`に渡す前に
+サーバー証明書と中間証明書を結合しておくこと(`cat server.crt intermediate.crt > fullchain.crt`)。
+
+証明書を更新(更新日が来て再発行された等)する場合は、同じSecretを作り直す。
+
+```bash
+kubectl delete secret moya4-tls --namespace pii-masking-shield
+kubectl create secret tls moya4-tls \
+  --namespace pii-masking-shield \
+  --cert=path/to/new-pdpro.jp.crt \
+  --key=path/to/new-pdpro.jp.key
+```
+
+Secretの中身(有効期限など)を確認したい場合:
+
+```bash
+kubectl -n pii-masking-shield get secret moya4-tls -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates
+```
+
+---
+
+**ILBがインターネットから到達可能なパブリックIPの場合**は、代わりに
+cert-managerによる自動発行(Let's Encrypt)も使える。
+`idcf-system` 名前空間にcert-manager自体はプリインストールされているが、
 証明書の発行元(ClusterIssuer)は自分で作成する必要がある。
 
 ```bash
@@ -83,15 +120,15 @@ kubectl get clusterissuer
 ```
 
 0件の場合、`k8s/cluster-issuer.example.yaml` を参考にLet's Encrypt用の
-ClusterIssuerを作成する(メールアドレスを書き換えてから適用)。
+ClusterIssuerを作成し(メールアドレスを書き換えてから適用)、
+`k8s/ingress.yaml` に `cert-manager.io/cluster-issuer` の注釈を追加する
+(値はClusterIssuerの名前、既定は `letsencrypt-prod`)。
 
 ```bash
 kubectl apply -f k8s/cluster-issuer.example.yaml
 ```
 
-作成後、`k8s/ingress.yaml` の `cert-manager.io/cluster-issuer` の値が
-作成したClusterIssuerの名前(既定は `letsencrypt-prod`)と一致していることを
-確認する。証明書の発行状況は以下で確認できる。
+証明書の発行状況は以下で確認できる。
 
 ```bash
 kubectl -n pii-masking-shield get certificate
