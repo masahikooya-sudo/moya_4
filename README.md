@@ -225,38 +225,35 @@ kubectl create secret generic moya4-secrets \
   --from-literal=SESSION_SECRET_KEY="$(openssl rand -hex 32)"
 ```
 
-#### 4. 公開ドメインの設定
+#### 4. ILBによる公開(現在の既定構成: ドメイン無し・ポート8000)
 
-`k8s/ingress.yaml` の `host:` と `tls.hosts` には、実際に用意したドメイン名
-(既定値は `masking.pdpro.jp`)を設定する。このドメインは、Google Cloud
-Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
-(`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
+現在の既定構成では、独自ドメインやIngressは使わず、`k8s/service.yaml`
+(`type: LoadBalancer`、`loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"`
+annotation)で申し込み済みのILBをこのアプリのServiceに直接割り当てる。
+社員は、ILBに割り当てられたIPアドレス(またはIDCF側のホスト名)にポート
+`8000` を付けてアクセスする(`http://<ILBのIP>:8000/`)。
 
-`ingressClassName` は、クラスタに実際に登録されている名前に合わせる
-(`kubectl get ingressclass` で確認。IDCFクラウド コンテナは独自の
-IngressClassを持ち、確認環境では `idcf-ilb` だった。既定値もこれに
-合わせてあるが、環境によって名前が異なる可能性があるので必ず確認すること)。
+```bash
+kubectl -n pii-masking-shield get svc moya4
+# EXTERNAL-IP列に割り当てられたIP/ホスト名が表示される
+```
 
-**IDCFクラウドのIngressでTLS(`tls:`ブロック)を使う場合、事前にコンソールで
-SSLポリシーを発行し、そのIDを `ilb.idcfcloud.com/sslpolicy-id` annotationに
-設定する必要がある。**これが無い(または値が間違っている)と、Ingressの
-`ADDRESS` が割り当てられず、LBの生成に失敗する
-(`kubectl describe ingress moya4` に `generateLB failed: ... sslpolicy-id
-annotation is not found` と表示される)。
+> **Googleログインに関する重要な注意**: この構成はHTTPで公開されるため、
+> Google Cloud ConsoleのOAuthクライアントの「承認済みのリダイレクトURI」には
+> `http://<上記のIP>:8000/auth/callback` を登録する。Googleは通常、
+> `localhost` 以外のHTTPリダイレクトURIを本番用途では推奨しておらず、
+> 登録時に警告が出る、またはIPアドレスをリダイレクトURIとして受け付けない
+> 場合がある。その場合はGoogle Cloud Console側の実際の挙動を確認しながら
+> 進めること。動作しない場合は、ドメイン名+HTTPS化(下記の代替案)が必要になる。
 
-cert-managerを使わない場合は `cert-manager.io/cluster-issuer` の注釈を削除し、
-`tls.secretName` に指定した名前で証明書のSecretを別途用意するか、
-`tls:` ブロックごと削除してHTTPで公開する(Googleログインの都合上、
-本番運用ではHTTPS化を強く推奨する)。cert-managerを使う場合、
-ClusterIssuer(証明書の発行元)を別途作成する必要がある
-(`k8s/cluster-issuer.example.yaml` 参照)。
+ドメイン名+TLS終端(cert-manager等)を使う構成に変更したい場合は、
+`k8s/service.yaml` を `k8s/service-clusterip.example.yaml` の内容で上書きし、
+`k8s/kustomization.yaml` の `resources` に `ingress.yaml` を追加した上で、
+`k8s/configmap.yaml` の `SESSION_HTTPS_ONLY` を `"true"` に戻す
+(`k8s/ingress.yaml` にはドメイン `masking.pdpro.jp` とSSLポリシーIDを
+設定済みなので、そのまま使える)。
 
-Ingressを使わず、代わりにIDCFクラウドのILBをこのアプリのServiceに直接
-割り当てて公開したい場合は、`k8s/service-loadbalancer.example.yaml` を参考に
-`kustomization.yaml` の `resources` から `ingress.yaml` を外し、
-代わりにこのファイルを追加する。
-
-ILB・IngressClass・ClusterIssuerまわりの詳しい確認手順は
+ILB・IngressClassまわりの詳しい確認手順は
 `k8s/OPERATIONS.md` の「起動」章にまとめている。
 
 #### 5. 永続ボリューム(監査ログ)
@@ -283,11 +280,11 @@ kubectl -n pii-masking-shield logs -f deployment/moya4
 ```
 
 ヘルスチェック用に認証不要の `GET /healthz` を用意している
-(`{"status": "ok"}` を返す)。ドメインを設定する前に動作だけ確認したい場合は、
-ポートフォワードで直接アクセスできる。
+(`{"status": "ok"}` を返す)。ILBのIPが割り当てられる前に動作だけ確認したい
+場合は、ポートフォワードで直接アクセスできる。
 
 ```bash
-kubectl -n pii-masking-shield port-forward svc/moya4 8000:80
+kubectl -n pii-masking-shield port-forward svc/moya4 8000:8000
 # ブラウザで http://localhost:8000 (AUTH_ENABLED=true の場合はログインが必要)
 ```
 

@@ -7,7 +7,11 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
-  - ingress.yaml
+  # ドメイン名を使わず、ILBに直接社員がアクセスする現在の構成のため、
+  # ingress.yamlは含めない(ドメイン+TLS終端をする場合の代替案として
+  # リポジトリには残してある。使う場合はservice.yamlを
+  # service-clusterip.example.yamlの内容に差し替えたうえで
+  # ここにingress.yamlを追加すること)。
   # secret.example.yaml はテンプレートなので含めない。
   # moya4-secrets は `kubectl create secret generic` で別途作成すること。
 

@@ -1,13 +1,26 @@
+# ドメインを使わず、IDCFクラウドのILB(Infinite LB)経由でこのアプリの
+# Serviceを直接公開する構成(社員はILBに割り当てられたIPまたはIDCF側の
+# ホスト名に対して、ポート8000を指定してアクセスする想定)。
+#
+# annotationの `loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"` により、
+# 申し込み済みのILBがこのServiceに割り当てられる。
+#
+# ドメイン名やIngress経由でのTLS終端(cert-manager)を使いたい場合は、
+# 代わりに `service-clusterip.example.yaml` をservice.yamlとして使い、
+# `ingress.yaml` をkustomization.yamlのresourcesに追加すること
+# (どちらもリポジトリ内に残してある)。
 apiVersion: v1
 kind: Service
 metadata:
   name: moya4
   namespace: pii-masking-shield
+  annotations:
+    loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"
 spec:
   selector:
     app: moya4
   ports:
     - name: http
-      port: 80
+      port: 8000
       targetPort: http
-  type: ClusterIP
+  type: LoadBalancer
