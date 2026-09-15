@@ -1,18 +1,8 @@
-# IDCFクラウド コンテナ(RKE2ベース)にはnginx Ingress Controllerが
-# 標準で同梱されていることが多い。申し込み済みのILBは、通常この
-# Ingress ControllerのService(type: LoadBalancer、kube-system名前空間)に
-# 割り当てる形で連携する。以下のコマンドで対象のServiceを確認できる。
-#
-#   kubectl get svc -A | grep -i ingress
-#
-# そのServiceに loadbalancer.idcfcloud.com/loadbalancer-class: "ilb" の
-# annotationが付いていない場合は付与する(IDCFクラウドのコンソールで
-# ILBを申し込んだ時点で自動的に設定されていることもあるので、まず
-# 現状を確認すること)。この方式ならIngress Controller1つの背後に
-# 複数アプリを相乗りさせられ、cert-managerによるTLS自動化(下記)も使える。
-#
-# Ingress Controllerを使わずアプリを直接ILBで公開したい場合は、
-# service-loadbalancer.example.yaml を参照。
+# IDCFクラウド コンテナには、nginx等の汎用Ingress Controllerではなく、
+# 独自のIngressClass(`idcf-ilb`、コントローラーは`idcfcloud.com/idcf-ingress`)
+# が用意されている(`kubectl get ingressclass` で実機確認済み)。これを
+# 指定するだけでILBとの連携が行われる(環境によって名前が異なる可能性が
+# あるため、必ず自分のクラスタで確認してから合わせること)。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -24,9 +14,7 @@ metadata:
     # secretNameに設定するか、暫定的にHTTP公開(tlsブロックごと削除)にする。
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
-  # クラスタに導入されているIngress Controllerに合わせて変更する
-  # (`kubectl get ingressclass` で確認できる)。
-  ingressClassName: nginx
+  ingressClassName: idcf-ilb
   tls:
     - hosts:
         - masking.example.com # 実際のドメインに置き換える
@@ -36,7 +24,11 @@ spec:
       http:
         paths:
           - path: /
-            pathType: Prefix
+            # IDCFクラウドの独自Ingress用アドミッションWebhook
+            # (validate-idcf-ingress.idcfcloud.com)は、pathTypeとして
+            # ImplementationSpecific以外(Prefix/Exact)を拒否することを
+            # 実機で確認した。標準的なPrefixではなくこちらを使う。
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: moya4
