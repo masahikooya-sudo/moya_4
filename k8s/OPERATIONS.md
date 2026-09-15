@@ -54,31 +54,49 @@ kubectl -n pii-masking-shield port-forward svc/moya4 8000:80
 
 ### ILB(Infinite LB)との連携について
 
-ILBの申し込みが完了していても、**Kubernetes側での紐付けは別途必要な場合がある**。
-以下で確認する。
+IDCFクラウド コンテナには、nginx等の汎用Ingress Controllerではなく、
+**独自のIngressClass**が用意されている(確認環境では `idcf-ilb`、
+コントローラーは `idcfcloud.com/idcf-ingress`)。以下で確認する。
 
 ```bash
-kubectl get svc -A | grep -i ingress
+kubectl get ingressclass
 ```
 
-IDCFクラウド コンテナ(RKE2ベース)にはnginx Ingress Controllerが標準で
-同梱されていることが多く、上記コマンドでその `Service`(通常
-`kube-system` 名前空間、`type: LoadBalancer`)が見つかるはずである。
-この`Service`に `EXTERNAL-IP` が付与されていて、それがILBのIPと一致していれば
-既に連携済み。付与されていない場合は、その`Service`に以下のannotationを
-追加する(IDCFクラウドのコンソール操作で自動付与されることもあるため、
-まず現状を確認してから対応すること)。
+表示された名前を、`k8s/ingress.yaml` の `ingressClassName` に設定する
+(既定では `idcf-ilb` にしてあるが、環境によって名前が異なる可能性がある)。
+この方式では、Ingress ControllerのServiceを探して手動でannotationを
+付与するといった作業は不要で、正しいIngressClassを指定するだけで
+ILBとの連携が行われる。
 
-```yaml
-metadata:
-  annotations:
-    loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"
-```
-
-Ingress Controllerを経由せず、このアプリのServiceを直接ILBで公開したい場合は
+Ingressを経由せず、このアプリのServiceに直接ILBを紐づけたい場合は
 `k8s/service-loadbalancer.example.yaml` を参照(ただしTLS終端が無いため、
 Googleログインに必要なHTTPS化は別途対応が必要になる。cert-managerによる
 TLS自動化を使いたい場合はIngress経由の方式を推奨する)。
+
+### TLS証明書(cert-manager)の設定
+
+cert-managerは `idcf-system` 名前空間にプリインストールされているが、
+証明書の発行元(ClusterIssuer)は自分で作成する必要がある。
+
+```bash
+kubectl get clusterissuer
+```
+
+0件の場合、`k8s/cluster-issuer.example.yaml` を参考にLet's Encrypt用の
+ClusterIssuerを作成する(メールアドレスを書き換えてから適用)。
+
+```bash
+kubectl apply -f k8s/cluster-issuer.example.yaml
+```
+
+作成後、`k8s/ingress.yaml` の `cert-manager.io/cluster-issuer` の値が
+作成したClusterIssuerの名前(既定は `letsencrypt-prod`)と一致していることを
+確認する。証明書の発行状況は以下で確認できる。
+
+```bash
+kubectl -n pii-masking-shield get certificate
+kubectl -n pii-masking-shield describe certificate moya4-tls
+```
 
 ## 2. 停止(一時停止・コスト抑制)
 
@@ -184,5 +202,6 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 | Podが`Pending`のまま | PVCがbindできていない(StorageClass不一致) | `kubectl -n pii-masking-shield get pvc` / `kubectl get storageclass` |
 | `ImagePullBackOff` | レジストリ認証Secット未設定・誤り、またはレジストリがHTTPS化されていない | `kubectl -n pii-masking-shield describe pod <pod名>` |
 | Podは`Running`だが`Ready`にならない | 起動直後でspaCyモデル読み込み中(`startupProbe`待ち、数十秒かかることがある) | `kubectl -n pii-masking-shield logs deployment/moya4` |
-| Ingress経由でアクセスできない | ILBがIngress ControllerのServiceに紐づいていない | `kubectl get svc -A \| grep -i ingress`(上記1章参照) |
+| Ingress経由でアクセスできない | `ingressClassName` が実際のクラスタの名前と違う | `kubectl get ingressclass`(上記1章参照) |
+| HTTPSでアクセスできない・証明書エラー | ClusterIssuerが無い、または発行に失敗している | `kubectl -n pii-masking-shield describe certificate moya4-tls` |
 | Googleログインでエラーになる | Ingressのホスト名とGoogle Cloud ConsoleのリダイレクトURIが不一致 | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |

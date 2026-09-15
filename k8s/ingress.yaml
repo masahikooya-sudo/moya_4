@@ -1,17 +1,15 @@
-# IDCFクラウド コンテナ(RKE2ベース)にはnginx Ingress Controllerが
-# 標準で同梱されていることが多い。申し込み済みのILBは、通常この
-# Ingress ControllerのService(type: LoadBalancer、kube-system名前空間)に
-# 割り当てる形で連携する。以下のコマンドで対象のServiceを確認できる。
+# IDCFクラウド コンテナには、nginx等の汎用Ingress Controllerではなく、
+# 独自のIngressClass(`idcf-ilb`、コントローラーは`idcfcloud.com/idcf-ingress`)
+# が用意されている。これを指定するだけでILBとの連携が行われる
+# (`kubectl get ingressclass` で確認できる。環境によって名前が異なる
+# 可能性があるため、必ず自分のクラスタで確認してから合わせること)。
 #
-#   kubectl get svc -A | grep -i ingress
+# cert-managerも `idcf-system` 名前空間にプリインストールされているが、
+# ClusterIssuer(証明書の発行元)は自分で作成する必要がある
+# (`kubectl get clusterissuer` で0件なら未作成)。作成手順は
+# k8s/cluster-issuer.example.yaml を参照。
 #
-# そのServiceに loadbalancer.idcfcloud.com/loadbalancer-class: "ilb" の
-# annotationが付いていない場合は付与する(IDCFクラウドのコンソールで
-# ILBを申し込んだ時点で自動的に設定されていることもあるので、まず
-# 現状を確認すること)。この方式ならIngress Controller1つの背後に
-# 複数アプリを相乗りさせられ、cert-managerによるTLS自動化(下記)も使える。
-#
-# Ingress Controllerを使わずアプリを直接ILBで公開したい場合は、
+# アプリのServiceに直接ILBを紐づける方式(Ingressを使わない)にしたい場合は
 # service-loadbalancer.example.yaml を参照。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -19,14 +17,12 @@ metadata:
   name: moya4
   namespace: pii-masking-shield
   annotations:
-    # cert-managerを導入済みの場合、ClusterIssuer名に置き換えて有効化する。
-    # 未導入の場合はこの行を削除し、証明書を別途用意してtls配下の
+    # ClusterIssuerを作成してから有効にする(下記参照)。
+    # 未作成の場合はこの行を削除し、証明書を別途用意してtls配下の
     # secretNameに設定するか、暫定的にHTTP公開(tlsブロックごと削除)にする。
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
-  # クラスタに導入されているIngress Controllerに合わせて変更する
-  # (`kubectl get ingressclass` で確認できる)。
-  ingressClassName: nginx
+  ingressClassName: idcf-ilb
   tls:
     - hosts:
         - masking.example.com # 実際のドメインに置き換える
