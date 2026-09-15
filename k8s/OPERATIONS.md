@@ -73,30 +73,39 @@ Ingressを経由せず、このアプリのServiceに直接ILBを紐づけたい
 Googleログインに必要なHTTPS化は別途対応が必要になる。cert-managerによる
 TLS自動化を使いたい場合はIngress経由の方式を推奨する)。
 
-### TLS証明書(cert-manager)の設定
+### TLS証明書(手動登録)の設定
 
-cert-managerは `idcf-system` 名前空間にプリインストールされているが、
-証明書の発行元(ClusterIssuer)は自分で作成する必要がある。
+**このクラスタではcert-manager経由のLet's Encrypt(HTTP-01検証)は使えないことを
+実機で確認済み。** cert-managerはHTTP-01検証のため、検証用パス
+(`/.well-known/acme-challenge/<token>`)のみを持つ一時Ingressを自動生成するが、
+IDCF独自の管理Webhook(`validate-idcf-ingress.idcfcloud.com`)は
+「defaultBackendまたは`/`パスのルールが必要」としてこれを拒否するため、
+証明書発行が構造的に失敗する(`kubectl describe challenge <name>` に
+`admission webhook "validate-idcf-ingress.idcfcloud.com" denied ...
+defaultBackend or setting the rule of specified "" path or "/" is required`
+と表示される)。
 
-```bash
-kubectl get clusterissuer
-```
-
-0件の場合、`k8s/cluster-issuer.example.yaml` を参考にLet's Encrypt用の
-ClusterIssuerを作成する(メールアドレスを書き換えてから適用)。
-
-```bash
-kubectl apply -f k8s/cluster-issuer.example.yaml
-```
-
-作成後、`k8s/ingress.yaml` の `cert-manager.io/cluster-issuer` の値が
-作成したClusterIssuerの名前(既定は `letsencrypt-prod`)と一致していることを
-確認する。証明書の発行状況は以下で確認できる。
+そのため、既存の証明書ファイル(秘密鍵・証明書チェーン)を手動でSecretとして
+登録する。`k8s/ingress.yaml` には `cert-manager.io/cluster-issuer` 注釈は
+付けていない(付けるとcert-managerがこのSecretを上書き管理しようとして
+干渉するため)。
 
 ```bash
-kubectl -n pii-masking-shield get certificate
-kubectl -n pii-masking-shield describe certificate moya4-tls
+kubectl -n pii-masking-shield create secret tls moya4-tls \
+  --cert=path/to/fullchain.pem \
+  --key=path/to/privkey.pem
 ```
+
+証明書の有効期限が近づいたら、更新した証明書ファイルで同じコマンドを
+再実行する(`--dry-run=client -o yaml | kubectl apply -f -` で上書き適用も可)。
+
+```bash
+kubectl -n pii-masking-shield get secret moya4-tls
+```
+
+(DNS-01検証に対応したDNSプロバイダを使っている場合は、上記の問題を回避できる
+ため、`k8s/cluster-issuer.example.yaml` を参考にcert-managerでの自動化も
+検討できる。ただしこのクラスタでの動作確認はしていない)。
 
 ### SSLポリシー(IDCFクラウド固有)の設定
 
@@ -219,7 +228,8 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 | `ImagePullBackOff` | レジストリ認証Secット未設定・誤り、またはレジストリがHTTPS化されていない | `kubectl -n pii-masking-shield describe pod <pod名>` |
 | Podは`Running`だが`Ready`にならない | 起動直後でspaCyモデル読み込み中(`startupProbe`待ち、数十秒かかることがある) | `kubectl -n pii-masking-shield logs deployment/moya4` |
 | Ingress経由でアクセスできない | `ingressClassName` が実際のクラスタの名前と違う | `kubectl get ingressclass`(上記1章参照) |
-| HTTPSでアクセスできない・証明書エラー | ClusterIssuerが無い、または発行に失敗している | `kubectl -n pii-masking-shield describe certificate moya4-tls` |
+| HTTPSでアクセスできない・証明書エラー | `moya4-tls` Secretが未作成、または証明書ファイルが誤っている(このクラスタではcert-manager自動発行は使えない。上記「TLS証明書(手動登録)の設定」参照) | `kubectl -n pii-masking-shield get secret moya4-tls` |
+| Challengeが`pending`のまま・`admission webhook "validate-idcf-ingress.idcfcloud.com" denied ... defaultBackend or ... path or "/" is required` | cert-managerのHTTP-01検証用一時IngressがIDCFの管理Webhookに拒否されている(このクラスタでは構造的に非対応。手動証明書登録に切り替える) | `kubectl -n pii-masking-shield describe challenge <name>` |
 | `kubectl apply`が`admission webhook "validate-idcf-ingress.idcfcloud.com" denied`で失敗 | IngressのpathTypeが`ImplementationSpecific`以外になっている(IDCF独自の制約。`k8s/ingress.yaml`は対応済み) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml \| Select-String pathType` |
 | Ingressの`ADDRESS`が割り当てられない・`generateLB failed`エラー | `ilb.idcfcloud.com/sslpolicy-id` annotationが未設定、またはSSLポリシーIDが誤っている | `kubectl -n pii-masking-shield describe ingress moya4` |
 | Googleログインでエラーになる | Ingressのホスト名とGoogle Cloud ConsoleのリダイレクトURIが不一致 | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |

@@ -9,10 +9,13 @@ metadata:
   name: moya4
   namespace: pii-masking-shield
   annotations:
-    # cert-managerを導入済みの場合、ClusterIssuer名に置き換えて有効化する。
-    # 未導入の場合はこの行を削除し、証明書を別途用意してtls配下の
-    # secretNameに設定するか、暫定的にHTTP公開(tlsブロックごと削除)にする。
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # cert-manager(Let's EncryptのHTTP-01検証)は使わない: cert-managerが
+    # 検証用に自動生成する一時Ingress(ルート"/"パスを持たない)を、IDCF独自の
+    # 管理Webhookが「defaultBackendまたは"/"パスのルールが必要」として
+    # 拒否することを実機で確認した。このクラスタではHTTP-01検証が構造的に
+    # 成立しないため、既存の証明書を`kubectl create secret tls`で手動登録し、
+    # tls.secretNameで参照する方式にしている(下記参照)。
+    #
     # IDCFクラウドのIngressでTLSを使う場合、事前にコンソールで発行した
     # SSLポリシーのIDをここに指定しないとLBの生成に失敗する
     # (`generateLB failed: ... sslpolicy-id annotation is not found`)。

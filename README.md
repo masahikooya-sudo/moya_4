@@ -244,12 +244,25 @@ SSLポリシーを発行し、そのIDを `ilb.idcfcloud.com/sslpolicy-id` annot
 (`kubectl describe ingress moya4` に `generateLB failed: ... sslpolicy-id
 annotation is not found` と表示される)。
 
-cert-managerを使わない場合は `cert-manager.io/cluster-issuer` の注釈を削除し、
-`tls.secretName` に指定した名前で証明書のSecretを別途用意するか、
-`tls:` ブロックごと削除してHTTPで公開する(Googleログインの都合上、
-本番運用ではHTTPS化を強く推奨する)。cert-managerを使う場合、
-ClusterIssuer(証明書の発行元)を別途作成する必要がある
-(`k8s/cluster-issuer.example.yaml` 参照)。
+**このクラスタではcert-manager(Let's EncryptのHTTP-01検証)は使えないことを
+実機で確認済み**: cert-managerが検証用に自動生成する一時Ingress(ルート"/"
+パスを持たない)を、IDCF独自の管理Webhookが「defaultBackendまたは"/"パスの
+ルールが必要」として拒否するため、証明書発行が構造的に失敗する
+(`kubectl describe challenge <name>` に `admission webhook
+"validate-idcf-ingress.idcfcloud.com" denied ... defaultBackend or setting
+the rule of specified "" path or "/" is required` と表示される)。
+そのため既定では `cert-manager.io/cluster-issuer` の注釈を付けず、既存の
+証明書ファイルを手動でSecretとして登録する方式にしている。
+
+```bash
+kubectl -n pii-masking-shield create secret tls moya4-tls \
+  --cert=path/to/fullchain.pem \
+  --key=path/to/privkey.pem
+```
+
+(DNS-01検証(ドメインのTXTレコードで検証する方式。Ingressを使わないため
+上記の問題を回避できる)に対応したDNSプロバイダを使っている場合は、
+`k8s/cluster-issuer.example.yaml` を参考にcert-managerでの自動化も検討できる)。
 
 Ingressを使わず、代わりにIDCFクラウドのILBをこのアプリのServiceに直接
 割り当てて公開したい場合は、`k8s/service-loadbalancer.example.yaml` を参考に

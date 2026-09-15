@@ -1,8 +1,17 @@
-# cert-managerは `idcf-system` 名前空間にプリインストールされているが、
-# 証明書の発行元(ClusterIssuer)はクラスタ管理者側では作成されない
-# (Let's EncryptのACMEアカウントはユーザーごとに異なるため)。
-# 以下はLet's EncryptのHTTP-01チャレンジを使う一般的な設定例。
-# IDCFクラウド固有の推奨設定がある場合はそちらを優先すること
+# 【重要】このファイルのHTTP-01検証は、実機確認の結果IDCFクラウドの
+# idcf-ilb IngressClassでは使えないことが判明している。cert-managerが
+# 検証用に生成する一時Ingress(ルート"/"パスを持たない)を、IDCF独自の
+# 管理Webhook(validate-idcf-ingress.idcfcloud.com)が拒否するため、
+# 証明書発行が常に失敗する(Challengeが`pending`のまま進まなくなる)。
+# このクラスタでは k8s/ingress.yaml の通り、既存証明書を
+# `kubectl create secret tls` で手動登録する方式を使っている
+# (詳細はk8s/OPERATIONS.mdの「TLS証明書(手動登録)の設定」参照)。
+#
+# 以下はDNS-01検証(DNSプロバイダのAPIでTXTレコードを操作する方式。
+# Ingressを使わないため上記の問題を回避できる)に対応したDNSプロバイダを
+# 使っている場合の参考用に残してある一般的な設定例(HTTP-01版)。
+# 実際に使う場合は、cert-managerのドキュメントを参照してsolversを
+# dns01に書き換えること
 # (この内容は一般的なcert-manager/Kubernetesの知識に基づく例であり、
 # IDCFクラウド側のドキュメントで動作確認はしていない)。
 #
