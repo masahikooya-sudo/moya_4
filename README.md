@@ -225,36 +225,32 @@ kubectl create secret generic moya4-secrets \
   --from-literal=SESSION_SECRET_KEY="$(openssl rand -hex 32)"
 ```
 
-#### 4. ILBによる公開(現在の既定構成: ドメイン無し・ポート8000)
+#### 4. 公開ドメインの設定
 
-現在の既定構成では、独自ドメインやIngressは使わず、`k8s/service.yaml`
-(`type: LoadBalancer`、`loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"`
-annotation)で申し込み済みのILBをこのアプリのServiceに直接割り当てる。
-社員は、ILBに割り当てられたIPアドレス(またはIDCF側のホスト名)にポート
-`8000` を付けてアクセスする(`http://<ILBのIP>:8000/`)。
+`k8s/ingress.yaml` の `masking.example.com` を、実際に用意したドメイン名に
+書き換える(`host:` と `tls.hosts` の両方)。このドメインは、Google Cloud
+Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
+(`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
 
-```bash
-kubectl -n pii-masking-shield get svc moya4
-# EXTERNAL-IP列に割り当てられたIP/ホスト名が表示される
-```
+クラスタにIngress Controller(nginx-ingress等)が入っていない場合や、
+cert-managerを使わない場合は以下を調整する。
 
-> **Googleログインに関する重要な注意**: この構成はHTTPで公開されるため、
-> Google Cloud ConsoleのOAuthクライアントの「承認済みのリダイレクトURI」には
-> `http://<上記のIP>:8000/auth/callback` を登録する。Googleは通常、
-> `localhost` 以外のHTTPリダイレクトURIを本番用途では推奨しておらず、
-> 登録時に警告が出る、またはIPアドレスをリダイレクトURIとして受け付けない
-> 場合がある。その場合はGoogle Cloud Console側の実際の挙動を確認しながら
-> 進めること。動作しない場合は、ドメイン名+HTTPS化(下記の代替案)が必要になる。
+- `ingressClassName` を、クラスタに実際に入っているIngress Controllerの
+  クラス名に変更する(`kubectl get ingressclass` で確認)。
+- cert-managerを使わない場合は `cert-manager.io/cluster-issuer` の注釈を削除し、
+  `tls.secretName` に指定した名前で証明書のSecretを別途用意するか、
+  `tls:` ブロックごと削除してHTTPで公開する(Googleログインの都合上、
+  本番運用ではHTTPS化を強く推奨する)。
+- Ingress Controllerが無く、代わりにIDCFクラウドのロードバランサーサービスと
+  連携する `type: LoadBalancer` のServiceで公開したい場合は、
+  `k8s/service-loadbalancer.example.yaml` を参考に `kustomization.yaml` の
+  `resources` から `ingress.yaml` を外し、代わりにこのファイルを追加する。
 
-ドメイン名+TLS終端(cert-manager等)を使う構成に変更したい場合は、
-`k8s/service.yaml` を `k8s/service-clusterip.example.yaml` の内容で上書きし、
-`k8s/kustomization.yaml` の `resources` に `ingress.yaml` を追加した上で、
-`k8s/configmap.yaml` の `SESSION_HTTPS_ONLY` を `"true"` に戻す
-(`k8s/ingress.yaml` にはドメイン `masking.pdpro.jp` とSSLポリシーIDを
-設定済みなので、そのまま使える)。
-
-ILB・IngressClassまわりの詳しい確認手順は
-`k8s/OPERATIONS.md` の「起動」章にまとめている。
+ILB(Infinite LB)を既に申し込み済みの場合、通常はIngress ControllerのService
+(`kube-system` 名前空間、`kubectl get svc -A | grep -i ingress` で確認できる)に
+紐付ける形で連携する。紐付けの確認・設定方法や、ILBを直接このアプリの
+Serviceに割り当てる方法(`loadbalancer.idcfcloud.com/loadbalancer-class: "ilb"`
+というannotationを使う)は `k8s/OPERATIONS.md` の「起動」章に詳しく記載している。
 
 #### 5. 永続ボリューム(監査ログ)
 
@@ -280,11 +276,11 @@ kubectl -n pii-masking-shield logs -f deployment/moya4
 ```
 
 ヘルスチェック用に認証不要の `GET /healthz` を用意している
-(`{"status": "ok"}` を返す)。ILBのIPが割り当てられる前に動作だけ確認したい
-場合は、ポートフォワードで直接アクセスできる。
+(`{"status": "ok"}` を返す)。ドメインを設定する前に動作だけ確認したい場合は、
+ポートフォワードで直接アクセスできる。
 
 ```bash
-kubectl -n pii-masking-shield port-forward svc/moya4 8000:8000
+kubectl -n pii-masking-shield port-forward svc/moya4 8000:80
 # ブラウザで http://localhost:8000 (AUTH_ENABLED=true の場合はログインが必要)
 ```
 

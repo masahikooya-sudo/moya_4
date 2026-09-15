@@ -7,17 +7,13 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
-  # ドメイン名を使わず、ILBに直接社員がアクセスする現在の構成のため、
-  # ingress.yamlは含めない(ドメイン+TLS終端をする場合の代替案として
-  # リポジトリには残してある。使う場合はservice.yamlを
-  # service-clusterip.example.yamlの内容に差し替えたうえで
-  # ここにingress.yamlを追加すること)。
+  - ingress.yaml
   # secret.example.yaml はテンプレートなので含めない。
   # moya4-secrets は `kubectl create secret generic` で別途作成すること。
 
-# GitHub Container Registry(ghcr.io)を使う。IDCFクラウド側のレジストリを
-# 使う場合は newName をそちらの実際のホスト名に置き換える。
+# ここでIDCFクラウドのレジストリの実際のパスに置き換える。
+# 例: images.idcfcloud.net/<your-account>/moya4
 images:
   - name: moya4
-    newName: ghcr.io/masahikooya-sudo/moya4
+    newName: REPLACE_WITH_YOUR_REGISTRY/moya4
     newTag: latest
