@@ -40,4 +40,9 @@ spec:
               service:
                 name: moya4
                 port:
-                  name: http
+                  # 名前参照(name: http)だと、IDCFのIngressコントローラーが
+                  # HTTPS(443)用LB設定のバックエンドポートを解決できず
+                  # port:0 になり、ILB生成が失敗することを実機で確認した
+                  # (`create job id is empty: ... port:0 is invalid`)。
+                  # 番号を直接指定することで回避する。
+                  number: 8000
