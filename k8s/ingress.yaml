@@ -26,6 +26,14 @@ metadata:
     # (k8s/OPERATIONS.md の「TLS証明書(idcf-dns-certbotによる自動更新)」参照)。
 spec:
   ingressClassName: idcf-ilb
+  # IDCFのILBが "generateLB failed: default server is not set" で失敗する
+  # ことを実機で確認した。ホスト指定のrulesだけでなくdefaultBackendも
+  # 必要と見られるため、同じバックエンドを既定として明示する。
+  defaultBackend:
+    service:
+      name: moya4
+      port:
+        number: 8000
   rules:
     - host: masking.pdpro.jp
       http:
