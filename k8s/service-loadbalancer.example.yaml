@@ -1,3 +1,6 @@
+# 【非推奨】TLS証明書の自動更新(idcf-dns-certbot)はIngressのannotationを
+# 書き換える方式のため、この方式とは組み合わせられない(k8s/OPERATIONS.md参照)。
+#
 # Ingress Controllerを使わず、IDCFクラウドのILB(Infinite LB)で
 # このアプリのServiceを直接公開したい場合の代替案
 # (通常はIngress経由での公開(ingress.yaml)を推奨。下記コメント参照)。

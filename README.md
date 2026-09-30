@@ -227,7 +227,7 @@ kubectl create secret generic moya4-secrets \
 
 #### 4. 公開ドメインの設定
 
-`k8s/ingress.yaml` の `host:` と `tls.hosts` には、実際に用意したドメイン名
+`k8s/ingress.yaml` の `host:` には、実際に用意したドメイン名
 (既定値は `masking.pdpro.jp`)を設定する。このドメインは、Google Cloud
 Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
 (`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
@@ -237,39 +237,39 @@ Consoleで登録するOAuthクライアントの「承認済みのリダイレ�
 IngressClassを持ち、確認環境では `idcf-ilb` だった。既定値もこれに
 合わせてあるが、環境によって名前が異なる可能性があるので必ず確認すること)。
 
-**IDCFクラウドのIngressでTLS(`tls:`ブロック)を使う場合、事前にコンソールで
+**IDCFクラウドのIngressでHTTPSを使う場合、事前にコンソールで
 SSLポリシーを発行し、そのIDを `ilb.idcfcloud.com/sslpolicy-id` annotationに
 設定する必要がある。**これが無い(または値が間違っている)と、Ingressの
 `ADDRESS` が割り当てられず、LBの生成に失敗する
 (`kubectl describe ingress moya4` に `generateLB failed: ... sslpolicy-id
 annotation is not found` と表示される)。
 
-**このクラスタではcert-manager(Let's EncryptのHTTP-01検証)は使えないことを
-実機で確認済み**: cert-managerが検証用に自動生成する一時Ingress(ルート"/"
-パスを持たない)を、IDCF独自の管理Webhookが「defaultBackendまたは"/"パスの
-ルールが必要」として拒否するため、証明書発行が構造的に失敗する
-(`kubectl describe challenge <name>` に `admission webhook
-"validate-idcf-ingress.idcfcloud.com" denied ... defaultBackend or setting
-the rule of specified "" path or "/" is required` と表示される)。
-そのため既定では `cert-manager.io/cluster-issuer` の注釈を付けず、既存の
-証明書ファイルを手動でSecretとして登録する方式にしている。
+**TLS証明書は [kojiaki131/idcf-dns-certbot](https://github.com/kojiaki131/idcf-dns-certbot)
+で自動取得・更新する。** certbot(DNS-01検証)が取得した証明書をILBへ
+アップロードし、このIngressの `ilb.idcfcloud.com/sslcert-id` annotationを
+更新のたびに差し替える(ILBでTLSを終端するため、`tls:` ブロックやTLS Secretは
+使わない)。idcf-dns-certbot側では `INGRESS_TARGETS` に
+`pii-masking-shield/moya4` を指定し、`CERT_DOMAIN` をこのドメインを含む値
+(例: `*.pdpro.jp`)にしておく。
+
+Ingressを作成した直後だけは、現在の証明書IDを手動で付与する
+(certbotがIngressを書き換えるのは、証明書が実際に更新されたときだけのため)。
 
 ```bash
-kubectl -n pii-masking-shield create secret tls moya4-tls \
-  --cert=path/to/fullchain.pem \
-  --key=path/to/privkey.pem
+kubectl -n pii-masking-shield annotate ingress moya4 \
+  ilb.idcfcloud.com/sslcert-id=<現在のsslcert-id> --overwrite
 ```
 
-(DNS-01検証(ドメインのTXTレコードで検証する方式。Ingressを使わないため
-上記の問題を回避できる)に対応したDNSプロバイダを使っている場合は、
-`k8s/cluster-issuer.example.yaml` を参考にcert-managerでの自動化も検討できる)。
+`ilb.idcfcloud.com/sslcert-id` は `k8s/ingress.yaml` に書かないこと
+(固定値で書くと `kubectl apply -k k8s/` のたびに古い証明書IDへ巻き戻る)。
 
-Ingressを使わず、代わりにIDCFクラウドのILBをこのアプリのServiceに直接
-割り当てて公開したい場合は、`k8s/service-loadbalancer.example.yaml` を参考に
-`kustomization.yaml` の `resources` から `ingress.yaml` を外し、
-代わりにこのファイルを追加する。
+(cert-manager(Let's EncryptのHTTP-01検証)は、IDCF独自の管理Webhookが
+検証用の一時Ingressを拒否するため、このクラスタでは使えないことを実機で
+確認済み。また、Ingressを使わずServiceにILBを直接割り当てる方式
+(`k8s/service-loadbalancer.example.yaml`)は、上記の証明書自動更新と
+組み合わせられないため使わない。)
 
-ILB・IngressClass・ClusterIssuerまわりの詳しい確認手順は
+ILB・IngressClass・TLS証明書まわりの詳しい確認手順は
 `k8s/OPERATIONS.md` の「起動」章にまとめている。
 
 #### 5. 永続ボリューム(監査ログ)

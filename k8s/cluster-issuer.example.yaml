@@ -1,11 +1,13 @@
+# 【使用しない】TLS証明書はkojiaki131/idcf-dns-certbot(DNS-01)で自動更新している
+# (k8s/OPERATIONS.mdの「TLS証明書(idcf-dns-certbotによる自動更新)」参照)。
+#
 # 【重要】このファイルのHTTP-01検証は、実機確認の結果IDCFクラウドの
 # idcf-ilb IngressClassでは使えないことが判明している。cert-managerが
 # 検証用に生成する一時Ingress(ルート"/"パスを持たない)を、IDCF独自の
 # 管理Webhook(validate-idcf-ingress.idcfcloud.com)が拒否するため、
 # 証明書発行が常に失敗する(Challengeが`pending`のまま進まなくなる)。
-# このクラスタでは k8s/ingress.yaml の通り、既存証明書を
-# `kubectl create secret tls` で手動登録する方式を使っている
-# (詳細はk8s/OPERATIONS.mdの「TLS証明書(手動登録)の設定」参照)。
+# このクラスタでは冒頭の通り、idcf-dns-certbotで取得した証明書を
+# ILBのannotation(ilb.idcfcloud.com/sslcert-id)で反映する方式を使っている。
 #
 # 以下はDNS-01検証(DNSプロバイダのAPIでTXTレコードを操作する方式。
 # Ingressを使わないため上記の問題を回避できる)に対応したDNSプロバイダを

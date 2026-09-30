@@ -68,48 +68,70 @@ kubectl get ingressclass
 付与するといった作業は不要で、正しいIngressClassを指定するだけで
 ILBとの連携が行われる。
 
-Ingressを経由せず、このアプリのServiceに直接ILBを紐づけたい場合は
-`k8s/service-loadbalancer.example.yaml` を参照(ただしTLS終端が無いため、
-Googleログインに必要なHTTPS化は別途対応が必要になる。cert-managerによる
-TLS自動化を使いたい場合はIngress経由の方式を推奨する)。
+`k8s/service-loadbalancer.example.yaml`(Ingressを経由せずServiceに直接ILBを
+紐づける方式)は、TLS証明書の自動更新(下記のidcf-dns-certbot)と組み合わせられない
+ため、使わないこと(IDCFクラウドのガイドに、Service型ILBで証明書を指定する
+annotationの記載が無い)。
 
-### TLS証明書(手動登録)の設定
+### TLS証明書(idcf-dns-certbotによる自動更新)
 
-**このクラスタではcert-manager経由のLet's Encrypt(HTTP-01検証)は使えないことを
-実機で確認済み。** cert-managerはHTTP-01検証のため、検証用パス
-(`/.well-known/acme-challenge/<token>`)のみを持つ一時Ingressを自動生成するが、
-IDCF独自の管理Webhook(`validate-idcf-ingress.idcfcloud.com`)は
-「defaultBackendまたは`/`パスのルールが必要」としてこれを拒否するため、
-証明書発行が構造的に失敗する(`kubectl describe challenge <name>` に
-`admission webhook "validate-idcf-ingress.idcfcloud.com" denied ...
-defaultBackend or setting the rule of specified "" path or "/" is required`
-と表示される)。
+TLSはILBで終端する(アノテーション方式)。証明書の取得・更新は
+[kojiaki131/idcf-dns-certbot](https://github.com/kojiaki131/idcf-dns-certbot)
+(`cert-renew` namespaceで動くCronJob)に任せる。certbotはDNS-01検証で
+`*.pdpro.jp` 等のLet's Encrypt証明書を取得・更新し、更新のたびに
 
-そのため、既存の証明書ファイル(秘密鍵・証明書チェーン)を手動でSecretとして
-登録する。`k8s/ingress.yaml` には `cert-manager.io/cluster-issuer` 注釈は
-付けていない(付けるとcert-managerがこのSecretを上書き管理しようとして
-干渉するため)。
+1. 証明書をILBへアップロードし(`idcfcloud ilb upload_sslcert`)、
+2. このアプリのIngressの `ilb.idcfcloud.com/sslcert-id` annotationを新しい証明書IDに差し替える。
+
+そのため、このアプリ側でTLS Secret(`moya4-tls`)を作る必要は無く、
+`k8s/ingress.yaml` にも `tls:` ブロックは書いていない。
+
+(cert-manager経由のLet's Encrypt(HTTP-01検証)は、このクラスタでは使えないことを
+実機で確認済み。cert-managerが検証用に自動生成する一時Ingress(ルート`/`パスを
+持たない)を、IDCF独自の管理Webhook(`validate-idcf-ingress.idcfcloud.com`)が
+「defaultBackendまたは`/`パスのルールが必要」として拒否するため。)
+
+#### idcf-dns-certbot側の設定
+
+idcf-dns-certbotのREADMEの手順に従って構築し、次の値をこのアプリに合わせる。
+
+| ファイル | 設定 |
+|---|---|
+| `k8s/cronjob.yaml` | `CERT_DOMAIN: "*.pdpro.jp"`(`masking.pdpro.jp` を含む証明書) |
+| `k8s/cronjob.yaml` | `INGRESS_TARGETS: "pii-masking-shield/moya4"` |
+| `k8s/rbac.yaml` | Role/RoleBindingの `namespace: pii-masking-shield`、`resourceNames: [moya4]` |
+
+#### 初回だけ: 証明書IDをIngressへ付与する
+
+certbotがIngressを書き換えるのは、証明書が実際に更新されたときだけ
+(有効期限が近づいたとき)。Ingressを新しく作った直後は、現在の証明書IDを
+手動で1回だけ付与する。証明書IDは、certbotのJobログの
+`sslcert-idを...に変更します` の行、または `idcfcloud ilb list_sslcerts --profile ilb`
+で確認できる。
 
 ```bash
-kubectl -n pii-masking-shield create secret tls moya4-tls \
-  --cert=path/to/fullchain.pem \
-  --key=path/to/privkey.pem
+kubectl -n pii-masking-shield annotate ingress moya4 \
+  ilb.idcfcloud.com/sslcert-id=<現在のsslcert-id> --overwrite
 ```
 
-証明書の有効期限が近づいたら、更新した証明書ファイルで同じコマンドを
-再実行する(`--dry-run=client -o yaml | kubectl apply -f -` で上書き適用も可)。
+**`ilb.idcfcloud.com/sslcert-id` は `k8s/ingress.yaml` に書かないこと。**
+固定値で書くと、certbotが更新した後に `kubectl apply -k k8s/` を実行した時点で
+古い証明書IDへ巻き戻ってしまう(`kubectl annotate` で付けたannotationは、
+マニフェストに書いていなければ `kubectl apply` しても消えない)。
+
+Ingressを削除して作り直した場合(`kubectl delete -k k8s/` 後の再デプロイ等)も、
+annotationが消えるので上記を再実行する。
+
+現在の値は次で確認できる。
 
 ```bash
-kubectl -n pii-masking-shield get secret moya4-tls
+kubectl -n pii-masking-shield get ingress moya4 \
+  -o jsonpath='{.metadata.annotations.ilb\.idcfcloud\.com/sslcert-id}'
 ```
-
-(DNS-01検証に対応したDNSプロバイダを使っている場合は、上記の問題を回避できる
-ため、`k8s/cluster-issuer.example.yaml` を参考にcert-managerでの自動化も
-検討できる。ただしこのクラスタでの動作確認はしていない)。
 
 ### SSLポリシー(IDCFクラウド固有)の設定
 
-IDCFクラウドのIngressで`tls:`ブロックを使う場合、事前にIDCFクラウド コンソール
+IDCFクラウドのIngressでHTTPSを使う場合、事前にIDCFクラウド コンソール
 でSSLポリシーを発行し、そのIDを `k8s/ingress.yaml` の
 `ilb.idcfcloud.com/sslpolicy-id` annotationに設定する必要がある
 (実機で確認済み。`k8s/ingress.yaml` には設定済みのSSLポリシーIDが入っている)。
@@ -118,10 +140,15 @@ LBの生成に失敗する。
 
 ```bash
 kubectl -n pii-masking-shield describe ingress moya4
-# Warning Error ... generateLB failed: TLS SecretName "moya4-tls" exists,
-# but "ilb.idcfcloud.com/sslpolicy-id" annotation is not found
+# Warning Error ... generateLB failed: ...
+# "ilb.idcfcloud.com/sslpolicy-id" annotation is not found
 # と表示される場合、上記annotationが未設定または値が誤っている。
 ```
+
+> **未検証**: `tls:` ブロック無しで `sslpolicy-id` と `sslcert-id` の
+> annotationだけを付けたIngressで、ILBがHTTPSに切り替わること(および
+> IDCFの管理Webhookがこの形を受け付けること)は、まだ実機で確認していない。
+> HTTPSにならない場合は、上記の `describe ingress` のEventsを確認すること。
 
 ## 2. 停止(一時停止・コスト抑制)
 
@@ -183,7 +210,11 @@ kubectl -n pii-masking-shield rollout status deployment/moya4
 ### ドメイン・TLS設定だけを変更した場合
 
 `k8s/ingress.yaml` を編集して `kubectl apply -k k8s/` を実行するだけでよい
-(Podの再起動は不要)。
+(Podの再起動は不要)。certbotが書き込んだ `ilb.idcfcloud.com/sslcert-id` は
+マニフェストに書いていないため、`kubectl apply` しても消えない。
+
+ドメインを変更する場合は、新しいドメインがidcf-dns-certbotの `CERT_DOMAIN`
+(例: `*.pdpro.jp`)に含まれていることを確認すること。
 
 ## 4. 削除(後始末)
 
@@ -211,6 +242,12 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 削除後、以下はKubernetesの外側(IDCFクラウド側)の後始末になるため、
 必要に応じて別途対応する。
 
+- **idcf-dns-certbotの反映先から外す**: Ingressを削除したまま、certbotの
+  `k8s/cronjob.yaml` の `INGRESS_TARGETS` に `pii-masking-shield/moya4` が
+  残っていると、次回の証明書更新時にIngressの更新に失敗してJobが異常終了する。
+  アプリを撤去する場合は、`INGRESS_TARGETS` と `k8s/rbac.yaml` の該当ブロックを
+  両方削除する(再デプロイする場合は残しておき、「TLS証明書」章の
+  初回annotation付与を再実行する)。
 - **ILBの契約解除**: このアプリ用に申し込んだILBをもう使わない場合、
   IDCFクラウドのコンソールから解除しないと課金が続く。他のアプリと共用
   している場合は解除しないこと。
@@ -228,8 +265,8 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 | `ImagePullBackOff` | レジストリ認証Secット未設定・誤り、またはレジストリがHTTPS化されていない | `kubectl -n pii-masking-shield describe pod <pod名>` |
 | Podは`Running`だが`Ready`にならない | 起動直後でspaCyモデル読み込み中(`startupProbe`待ち、数十秒かかることがある) | `kubectl -n pii-masking-shield logs deployment/moya4` |
 | Ingress経由でアクセスできない | `ingressClassName` が実際のクラスタの名前と違う | `kubectl get ingressclass`(上記1章参照) |
-| HTTPSでアクセスできない・証明書エラー | `moya4-tls` Secretが未作成、または証明書ファイルが誤っている(このクラスタではcert-manager自動発行は使えない。上記「TLS証明書(手動登録)の設定」参照) | `kubectl -n pii-masking-shield get secret moya4-tls` |
-| Challengeが`pending`のまま・`admission webhook "validate-idcf-ingress.idcfcloud.com" denied ... defaultBackend or ... path or "/" is required` | cert-managerのHTTP-01検証用一時IngressがIDCFの管理Webhookに拒否されている(このクラスタでは構造的に非対応。手動証明書登録に切り替える) | `kubectl -n pii-masking-shield describe challenge <name>` |
+| HTTPSでアクセスできない・証明書エラー | Ingressに `ilb.idcfcloud.com/sslcert-id` が付いていない(初回付与を忘れている、Ingressを作り直した)、またはcertbotのJobが失敗している(上記「TLS証明書(idcf-dns-certbotによる自動更新)」参照) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` / `kubectl -n cert-renew get jobs` |
+| `kubectl apply -k` 後に古い証明書に戻った | `k8s/ingress.yaml` に `ilb.idcfcloud.com/sslcert-id` を固定値で書いている(マニフェストから削除し、`kubectl annotate` で現在のIDを付け直す) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |
 | `kubectl apply`が`admission webhook "validate-idcf-ingress.idcfcloud.com" denied`で失敗 | IngressのpathTypeが`ImplementationSpecific`以外になっている(IDCF独自の制約。`k8s/ingress.yaml`は対応済み) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml \| Select-String pathType` |
 | Ingressの`ADDRESS`が割り当てられない・`generateLB failed`エラー | `ilb.idcfcloud.com/sslpolicy-id` annotationが未設定、またはSSLポリシーIDが誤っている | `kubectl -n pii-masking-shield describe ingress moya4` |
 | Googleログインでエラーになる | Ingressのホスト名とGoogle Cloud ConsoleのリダイレクトURIが不一致 | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |
