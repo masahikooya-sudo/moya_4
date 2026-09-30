@@ -34,6 +34,13 @@ spec:
       name: moya4
       port:
         number: 8000
+  # defaultBackendを追加してもなお "default server is not set" が解消しない
+  # ことを実機で確認した。tls.secretNameを指定しない(証明書はILB側の
+  # sslcert-id annotationで管理する)tls.hostsだけのブロックを追加して、
+  # コントローラーに「このホストはHTTPS対応」と伝えることで解決するか試す。
+  tls:
+    - hosts:
+        - masking.pdpro.jp
   rules:
     - host: masking.pdpro.jp
       http:
