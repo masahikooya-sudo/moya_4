@@ -42,6 +42,19 @@ spec:
     - hosts:
         - masking.pdpro.jp
   rules:
+    # defaultBackend/tls.hostsを追加してもなお "default server is not set"
+    # が解消しないことを実機で確認した。「default server」とはSNI/Hostヘッダー
+    # に一致しない場合の既定の仮想ホストを指すと考えられるため、host未指定
+    # (空)のruleを追加して試す。
+    - http:
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: moya4
+                port:
+                  number: 8000
     - host: masking.pdpro.jp
       http:
         paths:
