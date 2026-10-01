@@ -16,5 +16,6 @@ services:
       - GOOGLE_ALLOWED_DOMAIN=${GOOGLE_ALLOWED_DOMAIN:-pdpro.jp}
       - SESSION_SECRET_KEY=${SESSION_SECRET_KEY}
       - SESSION_HTTPS_ONLY=${SESSION_HTTPS_ONLY:-false}
+      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-}
     volumes:
       - ./logs:/app/logs

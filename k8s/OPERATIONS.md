@@ -45,7 +45,19 @@ kubectl -n pii-masking-shield get pods
 kubectl -n pii-masking-shield logs -f deployment/moya4
 ```
 
-ドメイン・Ingressの設定が完了していれば `https://<ドメイン>/` でアクセスできる。
+Ingressの `ADDRESS` にILBのアドレスが割り当てられたら、`masking.pdpro.jp` の
+DNS(Aレコード)をそのアドレスへ向け、TLS証明書の初回annotation付与(下記)を
+済ませれば `https://masking.pdpro.jp/` でアクセスできる。
+
+```bash
+kubectl -n pii-masking-shield get ingress moya4
+```
+
+> ILBはVPN経由でのみ到達できるプライベート構成を前提にしている(既定)。
+> インターネットから直接アクセスさせる場合は、`k8s/ingress.yaml` の
+> `ilb.idcfcloud.com/public-ipaddress-assignment: "true"` のコメントを外して
+> パブリックIPを割り当てる。
+
 未設定の段階で先に動作だけ確認したい場合はポートフォワードを使う。
 
 ```bash
@@ -214,7 +226,9 @@ kubectl -n pii-masking-shield rollout status deployment/moya4
 マニフェストに書いていないため、`kubectl apply` しても消えない。
 
 ドメインを変更する場合は、新しいドメインがidcf-dns-certbotの `CERT_DOMAIN`
-(例: `*.pdpro.jp`)に含まれていることを確認すること。
+(例: `*.pdpro.jp`)に含まれていることを確認すること。あわせてDNSのAレコード、
+`k8s/configmap.yaml` の `OAUTH_REDIRECT_URI`(変更後は `rollout restart` が必要)、
+Google Cloud Consoleの「承認済みのリダイレクトURI」も変更する。
 
 ## 4. 削除(後始末)
 
@@ -269,4 +283,5 @@ Namespace(`pii-masking-shield`)ごと削除され、`kubectl create secret` で
 | `kubectl apply -k` 後に古い証明書に戻った | `k8s/ingress.yaml` に `ilb.idcfcloud.com/sslcert-id` を固定値で書いている(マニフェストから削除し、`kubectl annotate` で現在のIDを付け直す) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |
 | `kubectl apply`が`admission webhook "validate-idcf-ingress.idcfcloud.com" denied`で失敗 | IngressのpathTypeが`ImplementationSpecific`以外になっている(IDCF独自の制約。`k8s/ingress.yaml`は対応済み) | `kubectl -n pii-masking-shield get ingress moya4 -o yaml \| Select-String pathType` |
 | Ingressの`ADDRESS`が割り当てられない・`generateLB failed`エラー | `ilb.idcfcloud.com/sslpolicy-id` annotationが未設定、またはSSLポリシーIDが誤っている | `kubectl -n pii-masking-shield describe ingress moya4` |
-| Googleログインでエラーになる | Ingressのホスト名とGoogle Cloud ConsoleのリダイレクトURIが不一致 | `kubectl -n pii-masking-shield get ingress moya4 -o yaml` |
+| `generateLB failed: default server is not set` | バックエンドのServiceが`NodePort`になっていない(ClusterIPだとILBの振り分け先が作れない。`k8s/service.yaml`は対応済み) | `kubectl -n pii-masking-shield get svc moya4` |
+| Googleログインで`redirect_uri_mismatch` | `OAUTH_REDIRECT_URI`(`k8s/configmap.yaml`)とGoogle Cloud Consoleの「承認済みのリダイレクトURI」が不一致 | `kubectl -n pii-masking-shield get configmap moya4-config -o yaml` |

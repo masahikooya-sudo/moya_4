@@ -29,6 +29,12 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 # ログインを許可するGoogle Workspaceドメイン(このドメインのアカウントのみアクセス可)。
 GOOGLE_ALLOWED_DOMAIN = os.environ.get("GOOGLE_ALLOWED_DOMAIN", "pdpro.jp")
+# Googleに渡すリダイレクトURI(例: https://masking.pdpro.jp/auth/callback)。
+# ILB等のリバースプロキシでTLSを終端する構成では、アプリから見たリクエストが
+# http:// になるため、未設定だと http:// のURIが組み立てられてGoogle側の
+# 「承認済みのリダイレクトURI」と一致しなくなる。そのため本番では明示的に設定する。
+# 未設定の場合はリクエストのURLから組み立てる(ローカル実行向け)。
+OAUTH_REDIRECT_URI = os.environ.get("OAUTH_REDIRECT_URI", "")
 # セッションCookieの署名鍵。未設定の場合は起動のたびにランダム生成する(再起動でログイン状態が切れる)。
 SESSION_SECRET_KEY = os.environ.get("SESSION_SECRET_KEY", "")
 # セッションCookieに Secure 属性を付与するか(HTTPS配信時のみ true にする)。

@@ -10,4 +10,8 @@ spec:
     - name: http
       port: 80
       targetPort: http
-  type: ClusterIP
+  # IDCFクラウドのILB(Ingress)は各ノードのNodePortへ転送するため、
+  # Ingressのバックエンドに指定できるのはNodePortのServiceのみ。
+  # ClusterIPのままだとILBの振り分け先(サーバー)が作れず、
+  # "generateLB failed: default server is not set" で失敗する。
+  type: NodePort

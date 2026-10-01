@@ -63,7 +63,7 @@ async def login_page(request: Request):
 async def start_login(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url="/")
-    redirect_uri = request.url_for("auth_callback")
+    redirect_uri = config.OAUTH_REDIRECT_URI or request.url_for("auth_callback")
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
