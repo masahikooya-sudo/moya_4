@@ -9,6 +9,9 @@
 # ILBへアップロードし、このIngressの `ilb.idcfcloud.com/sslcert-id`
 # annotationを新しい証明書IDに差し替える(アノテーション方式。ILBで
 # TLSを終端するため、`tls:` ブロックとTLS Secretは使わない)。
+#
+# バックエンドのService(k8s/service.yaml)は必ずNodePortにすること
+# (ClusterIPだと "default server is not set" でLB生成に失敗する)。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -24,53 +27,34 @@ metadata:
     # 書いておくと `kubectl apply -k k8s/` のたびに古い証明書IDへ
     # 巻き戻ってしまう。初回だけ `kubectl annotate` で付与する
     # (k8s/OPERATIONS.md の「TLS証明書(idcf-dns-certbotによる自動更新)」参照)。
+    #
+    # ILBをインターネットから到達可能にする(パブリックIPを割り当てる)場合は
+    # 次のannotationを有効にする。VPN経由のみで使うプライベートILBなら不要。
+    # ilb.idcfcloud.com/public-ipaddress-assignment: "true"
 spec:
   ingressClassName: idcf-ilb
-  # IDCFのILBが "generateLB failed: default server is not set" で失敗する
-  # ことを実機で確認した。ホスト指定のrulesだけでなくdefaultBackendも
-  # 必要と見られるため、同じバックエンドを既定として明示する。
-  defaultBackend:
-    service:
-      name: moya4
-      port:
-        number: 8000
-  # defaultBackendを追加してもなお "default server is not set" が解消しない
-  # ことを実機で確認した。tls.secretNameを指定しない(証明書はILB側の
-  # sslcert-id annotationで管理する)tls.hostsだけのブロックを追加して、
-  # コントローラーに「このホストはHTTPS対応」と伝えることで解決するか試す。
-  tls:
-    - hosts:
-        - masking.pdpro.jp
   rules:
-    # defaultBackend/tls.hostsを追加してもなお "default server is not set"
-    # が解消しないことを実機で確認した。「default server」とはSNI/Hostヘッダー
-    # に一致しない場合の既定の仮想ホストを指すと考えられるため、host未指定
-    # (空)のruleを追加して試す。
+    # ILB利用時は host・path を指定しない形(pathTypeはImplementationSpecific)
+    # にする(他のアプリで実機動作確認済みの形に合わせている)。
+    # 以前は host 指定ルールや defaultBackend / tls.hosts を追加して
+    # "default server is not set" の回避を試していたが、原因はServiceが
+    # ClusterIPだったことのため、これらは削除した。
+    # masking.pdpro.jp のDNS(Aレコード)をILBのアドレスへ向けることで
+    # https://masking.pdpro.jp/ でアクセスできる。
     - http:
         paths:
-          - path: /
-            pathType: ImplementationSpecific
+          # IDCFクラウドの独自Ingress用アドミッションWebhook
+          # (validate-idcf-ingress.idcfcloud.com)は、pathTypeとして
+          # ImplementationSpecific以外(Prefix/Exact)を拒否することを
+          # 実機で確認した。
+          - pathType: ImplementationSpecific
             backend:
               service:
                 name: moya4
                 port:
-                  number: 8000
-    - host: masking.pdpro.jp
-      http:
-        paths:
-          - path: /
-            # IDCFクラウドの独自Ingress用アドミッションWebhook
-            # (validate-idcf-ingress.idcfcloud.com)は、pathTypeとして
-            # ImplementationSpecific以外(Prefix/Exact)を拒否することを
-            # 実機で確認した。標準的なPrefixではなくこちらを使う。
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: moya4
-                port:
+                  # Serviceのport(k8s/service.yaml の 80)を番号で指定する。
                   # 名前参照(name: http)だと、IDCFのIngressコントローラーが
-                  # HTTPS(443)用LB設定のバックエンドポートを解決できず
-                  # port:0 になり、ILB生成が失敗することを実機で確認した
+                  # バックエンドポートを解決できず port:0 になり、ILB生成が
+                  # 失敗することを実機で確認した
                   # (`create job id is empty: ... port:0 is invalid`)。
-                  # 番号を直接指定することで回避する。
-                  number: 8000
+                  number: 80

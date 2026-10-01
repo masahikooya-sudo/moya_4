@@ -112,6 +112,7 @@ cp .env.example .env
 | `GOOGLE_CLIENT_SECRET` | 同クライアントシークレット(必須) |
 | `GOOGLE_ALLOWED_DOMAIN` | ログインを許可するGoogle Workspaceドメイン(既定: `pdpro.jp`) |
 | `SESSION_SECRET_KEY` | セッションCookie署名鍵。`openssl rand -hex 32` 等で生成した値を推奨 |
+| `OAUTH_REDIRECT_URI` | GoogleへのリダイレクトURI(例: `https://masking.pdpro.jp/auth/callback`)。リバースプロキシでTLS終端する本番環境では必須。未設定時はリクエストのURLから組み立てる |
 
 `SESSION_SECRET_KEY` を省略すると起動のたびにランダム生成されるため、再起動でログイン状態が
 切れます(動作確認程度であれば省略可)。`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` が未設定の
@@ -227,10 +228,20 @@ kubectl create secret generic moya4-secrets \
 
 #### 4. 公開ドメインの設定
 
-`k8s/ingress.yaml` の `host:` には、実際に用意したドメイン名
-(既定値は `masking.pdpro.jp`)を設定する。このドメインは、Google Cloud
-Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」
-(`https://<ドメイン>/auth/callback`)とも一致させる必要がある。
+公開ドメイン(既定値は `masking.pdpro.jp`)は、IngressのhostではなくDNSで決まる。
+IDCFクラウドのILBはhost・path無しのルールで動作確認済みのため、`k8s/ingress.yaml`
+には `host:` を書いていない。Ingress作成後に `kubectl -n pii-masking-shield get ingress moya4`
+の `ADDRESS` に表示されるILBのアドレスへ、`masking.pdpro.jp` のAレコードを向ける。
+
+`k8s/configmap.yaml` の `OAUTH_REDIRECT_URI`(既定: `https://masking.pdpro.jp/auth/callback`)は、
+Google Cloud Consoleで登録するOAuthクライアントの「承認済みのリダイレクトURI」と
+完全に一致させる必要がある(ILBでTLSを終端するため、アプリから見たリクエストは
+`http://` になる。この値を設定しないと `http://` のURIがGoogleへ送られて
+`redirect_uri_mismatch` になる)。
+
+**`k8s/service.yaml` のServiceは `type: NodePort` にしておくこと。** IDCFクラウドの
+ILBは各ノードのNodePortへ転送するため、ClusterIPのServiceをバックエンドにすると
+`generateLB failed: default server is not set` でLBの生成に失敗する。
 
 `ingressClassName` は、クラスタに実際に登録されている名前に合わせる
 (`kubectl get ingressclass` で確認。IDCFクラウド コンテナは独自の

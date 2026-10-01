@@ -18,3 +18,7 @@ data:
   # Ingress(ILB)でHTTPS終端する構成を前提に、セッションCookieへ
   # Secure属性を付与する。
   SESSION_HTTPS_ONLY: "true"
+  # ILBでTLSを終端するため、アプリから見たリクエストはhttp://になる。
+  # GoogleへのリダイレクトURIをhttps://で固定する(Google Cloud Consoleの
+  # 「承認済みのリダイレクトURI」にも同じ値を登録すること)。
+  OAUTH_REDIRECT_URI: "https://masking.pdpro.jp/auth/callback"
