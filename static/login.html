@@ -5,56 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ログイン - PII Masking Shield</title>
 <link rel="stylesheet" href="/static/style.css">
-<style>
-  .login-wrap {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .login-card {
-    width: 100%;
-    max-width: 380px;
-    text-align: center;
-  }
-  .login-card .logo {
-    width: 56px;
-    height: 56px;
-    margin: 0 auto 18px;
-    font-size: 1.7rem;
-  }
-  .login-card h1 {
-    font-size: 1.3rem;
-    margin: 0 0 6px;
-  }
-  .login-card p.subtitle {
-    margin-bottom: 26px;
-  }
-  .google-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    background: #fff;
-    color: #1f1f1f;
-    border: 1px solid var(--card-border);
-    border-radius: 10px;
-    padding: 12px 18px;
-    font-size: 0.95rem;
-    font-weight: 600;
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .google-btn:hover {
-    opacity: 0.9;
-  }
-  .login-error {
-    margin-top: 18px;
-    display: none;
-  }
-</style>
+<link rel="stylesheet" href="/static/login.css">
 </head>
 <body>
   <div class="login-wrap">
@@ -79,10 +30,6 @@
     </div>
   </div>
 
-  <script>
-    if (new URLSearchParams(window.location.search).get("error") === "forbidden") {
-      document.getElementById("login-error").style.display = "block";
-    }
-  </script>
+  <script src="/static/login.js"></script>
 </body>
 </html>

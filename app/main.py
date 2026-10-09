@@ -114,6 +114,39 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """クリックジャッキング・MIMEスニッフィング等への対策ヘッダーを全レスポンスに付与する。
+
+    このアプリはサーバー側リダイレクトのみでGoogleログインを行い(クライアント側の
+    Google JS SDKは使用しない)ため、CSPはscript-src/style-srcとも'self'のみで
+    'unsafe-inline'を許可せずに済む。
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self'; "
+            "img-src 'self'; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # TLSはIDCFのILBで終端されるため、アプリ自身はhttp/httpsを区別できない。
+        # 本番ドメイン(masking.pdpro.jp)は常にHTTPS経由でのみ公開されるため、
+        # リクエストのスキームに関わらず常に付与する。
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        if request.url.path == "/" or request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """未ログインのアクセスを /login へ誘導する(APIは401を返す)。"""
 
@@ -143,6 +176,9 @@ app.add_middleware(
     same_site="lax",
     https_only=config.SESSION_HTTPS_ONLY,
 )
+# 認証リダイレクト・エラーレスポンス・静的ファイルを含む全レスポンスに
+# ヘッダーを付与したいため、最も外側になるよう最後に追加する。
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.get("/api/me")
