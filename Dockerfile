@@ -36,6 +36,20 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# python:3.11-slim ベースイメージ自体がシステムPython側にpip/setuptools/wheelを
+# 同梱しており、アプリは/opt/venvだけで動作するため不要。builderステージの
+# venvからは除去済みだが、ベースイメージ本体のこれらも最終イメージの
+# 攻撃面を減らすためここで削除する(Trivyスキャンで検出されたpip/
+# setuptools付属jaraco.contextの脆弱性に対応)。
+RUN python3 -m pip uninstall -y pip setuptools wheel 2>/dev/null; \
+    rm -rf /usr/local/lib/python3.11/site-packages/pip* \
+           /usr/local/lib/python3.11/site-packages/setuptools* \
+           /usr/local/lib/python3.11/site-packages/wheel* \
+           /usr/local/lib/python3.11/site-packages/_distutils_hack \
+           /usr/local/lib/python3.11/site-packages/pkg_resources \
+           /usr/local/bin/pip* \
+           /usr/local/bin/wheel*
+
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
