@@ -1,13 +1,16 @@
-fastapi==0.115.6
+fastapi==0.143.0
 uvicorn[standard]==0.32.1
-python-multipart==0.0.17
-presidio-analyzer==2.2.358
-presidio-anonymizer==2.2.358
+python-multipart==0.0.32
+presidio-analyzer==2.2.364
+presidio-anonymizer==2.2.364
 spacy==3.7.5
 openpyxl==3.1.5
 python-docx==1.2.0
 python-pptx==1.0.2
 PyMuPDF==1.28.2
-Authlib==1.6.12
+Authlib==1.8.0
 itsdangerous==2.2.0
 httpx==0.28.1
+# presidio-anonymizer 2.2.364が `cryptography<49.0.0` を要求するため、
+# このバージョンに固定する(2026-10時点のpip-audit調査より)。
+cryptography==48.0.1
